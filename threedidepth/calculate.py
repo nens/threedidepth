@@ -12,40 +12,149 @@ from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
 
-
-GRIDADMIN_PATH = "var/testdata/12997/gridadmin.h5"
-DEM_PATH = "var/testdata/12997/dem.tif"
-RESULTS_3DI_PATH = "var/testdata/12997/results_3di.nc"
-WATERDEPTH_PATH = "waterdepth.tif"
+MODE_COPY = "copy"
+MODE_NODGRID = "nodgrid"
+MODE_INTERPOLATE = "interpolate"
+MODE_CONSTANT = "cell"
 
 
 class Calculator:
-    pass
+    """Depth calculator using constant waterlevel in a grid cell.
 
+    Args:
+        gridadmin_path (str): Path to gridadmin.h5 file.
+        results_3di_path (str): Path to results_3di.nc file.
+        calculation_step (int): Calculation step for the waterdepth.
+        dem_pixelsize (float): Size of dem pixel in projected coordinates
+        dem_shape (int, int): Shape of the dem array.
+        dem_geo_transform: (tuple) Geo_transform of the dem.
+    """
+    PIXEL_MAP = "pixel_map"
+    LOOKUP_S1 = "lookup_s1"
+    INTERPOLATOR = "interpolator"
 
-class BaseCalculator(Calculator):
-    def __init__(self, gridadmin_path, results_3di_path, calculation_step):
+    def __init__(
+        self,
+        gridadmin_path,
+        results_3di_path,
+        calculation_step,
+        dem_shape,
+        dem_geo_transform,
+        dem_pixelsize,
+    ):
         self.gridadmin_path = gridadmin_path
         self.results_3di_path = results_3di_path
         self.calculation_step = calculation_step
+        self.dem_shape = dem_shape
+        self.dem_geo_transform = dem_geo_transform
+        self.dem_pixelsize = dem_pixelsize
 
-    def __call__(self, offset, values, no_data_value):
+    def __call__(self, indices, values, no_data_value):
         """Return result values array.
 
         Args:
-            offset (int, int): (row, col)-tuple determining array position
+            indices (tuple): ((i1, j1), (i2, j2)) subarray indices
             values (array): source values for the calculation
-            no_data_value (scalar): source and result no_data_value.
+            no_data_value (scalar): source and result no_data_value
 
-        Override this method to implement a different calculation. The default
+        Override this method to implement a calculation. The default
         implementation is to just return the values, effectively copying the
         source.
 
         Note that the no_data_value for the result has to correspond to the
         no_data_value argument.
         """
+        raise NotImplementedError
 
-        return values
+    @staticmethod
+    def _depth_from_level(dem, fillvalue, waterlevel):
+        # determine depth
+        depth = np.full_like(dem, fillvalue)
+        dem_active = (dem != fillvalue)
+        waterlevel_active = (waterlevel != NO_DATA_VALUE)
+        active = dem_active & waterlevel_active
+        depth_1d = waterlevel[active] - depth[active]
+
+        # paste positive depths only
+        negative_1d = (depth_1d <= 0)
+        depth_1d[negative_1d] = fillvalue
+        depth[active] = depth_1d
+
+        return depth
+
+    @property
+    def lookup_s1(self):
+        try:
+            return self.cache[self.LOOKUP_S1]
+        except KeyError:
+            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=[self.calculation_step])
+            data = timeseries.only("s1", "id").data
+            lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
+            lookup_s1[data["id"]] = data["s1"]
+            self.cache[self.LOOKUP_S1] = lookup_s1
+        return lookup_s1
+
+    @property
+    def interpolator(self):
+        try:
+            return self.cache[self.INTERPOLATOR]
+        except KeyError:
+            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=[self.calculation_step])
+            data = timeseries.only("s1", "coordinates").data
+            points = data["coordinates"].transpose()
+            values = data["coordinates"][0]
+            interpolator = LinearNDInterpolator(
+                points,
+                values,
+                fill_value=NO_DATA_VALUE
+            )
+            self.cache[self.INTERPOLATOR] = interpolator
+            return interpolator
+
+    @property
+    def pixel_map(self):
+        try:
+            return self.cache[self.PIXEL_MAP]
+        except KeyError:
+            pixel_map = self.gr.grid.get_pixel_map(
+                dem_pixelsize=self.dem_pixelsize, dem_shape=self.dem_shape,
+            )
+            self.cache[self.PIXEL_MAP] = pixel_map
+            return pixel_map
+
+    def _get_nodgrid(self, indices):
+        """Return node grid.
+
+        Args:
+            indices (tuple): ((i1, j1), (i2, j2)) subarray indices
+        """
+        (i1, j1), (i2, j2) = indices
+        return self.pixel_map[i1:i2, j1:j2]
+
+    def _get_nodgrid_new(self, indices):
+        """Return node grid.
+
+        Args:
+            indices (tuple): ((i1, j1), (i2, j2)) subarray indices
+        """
+        (i1, j1), (i2, j2) = indices
+        # note that get_nodgrid() expects a columns-first bbox
+        return self.gr.cells.get_nodgrid(
+            [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER,
+        )
+
+    def _get_points(self, indices):
+        """Return points array.
+
+        Args:
+            indices (tuple): ((i1, j1), (i2, j2)) subarray indices
+        """
+        (i1, j1), (i2, j2) = indices
+        local_ji = np.mgrid[j1:j2, i1:i2].reshape(2, -1).transpose()
+        p, a, b, q, c, d = self.dem_geo_transform
+        return local_ji * [a, d] + [p, q]
 
     def __enter__(self):
         self.gr = GridH5ResultAdmin(self.gridadmin_path, self.results_3di_path)
@@ -57,129 +166,73 @@ class BaseCalculator(Calculator):
         self.cache = None
 
 
-class ConstantLevelDepthCalculator(BaseCalculator):
-    """Depth calculator using constant waterlevel in a grid cell.
+class CopyCalculator(Calculator):
+    """Return input values.
 
-    Args:
-        dem_pixelsize (float): Size of dem pixel in projected coordinates
-        dem_shape (int, int): Shape of the dem array.
-        gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to results_3di.nc file.
-        calculation_step (int): Calculation step for the waterdepth.
     """
-    PIXEL_MAP = "pixel_map"
-    LOOKUP_S1 = "lookup_s1"
+    def __call__(self, indices, values, no_data_value):
+        return values
 
-    def __init__(self, dem_pixelsize, dem_shape, **kwargs):
-        super().__init__(**kwargs)
-        self.dem_pixelsize = dem_pixelsize
-        self.dem_shape = dem_shape
 
-    def __call__(self, offset, values, no_data_value):
-        """Return waterdepth array.
+class NodGridCalculator(Calculator):
+    """Return node grid.
 
-        """
-        # get or create the pixel map
-        if self.PIXEL_MAP in self.cache:
-            pixel_map = self.cache[self.PIXEL_MAP]
-        else:
-            pixel_map = self.gr.grid.get_pixel_map(
-                dem_pixelsize=self.dem_pixelsize, dem_shape=self.dem_shape,
-            )
-            self.cache[self.PIXEL_MAP] = pixel_map
+    """
+    def __call__(self, indices, values, no_data_value):
+        return self._get_nodgrid(indices)
 
-        # get or create the s1 lookup (the waterlevel table)
-        if self.LOOKUP_S1 in self.cache:
-            lookup_s1 = self.cache[self.LOOKUP_S1]
-        else:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=[self.calculation_step])
-            data = timeseries.only("s1", "id").data
-            lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data["s1"]
-            self.cache[self.LOOKUP_S1] = lookup_s1
 
-        # determine waterlevel
-        i1, j1 = offset
-        h, w = values.shape
-        i2, j2 = i1 + h, j1 + w
-        waterlevel = lookup_s1[pixel_map[i1:i2, j1:j2]]
+class ConstantLevelDepthCalculator(Calculator):
+    """Return waterdepth array.
 
-        # determine depth
-        dem = values
-        depth = np.full_like(dem, no_data_value)
-        dem_active = (dem != no_data_value)
-        waterlevel_active = (waterlevel != NO_DATA_VALUE)
-        active = dem_active & waterlevel_active
-        depth_1d = waterlevel[active] - values[active]
-
-        # paste positive depths
-        negative_1d = (depth_1d <= 0)
-        depth_1d[negative_1d] = no_data_value
-        depth[active] = depth_1d
-
-        return depth
-
-        # new procedure, gives error
-        bbox_pix = [offset] + [o + s for (o, s) in zip(offset, values.shape)]
-        nodgrid = self.gr.cells.get_nodgrid(
-            bbox_pix, subset_name=SUBSET_2D_OPEN_WATER,
+    """
+    def __call__(self, indices, values, no_data_value):
+        waterlevel = self.lookup_s1[self._get_nodgrid(indices)]
+        return self._depth_from_level(
+            dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
         )
 
 
-class InterpolatedLevelDepthCalculator(BaseCalculator):
-    """Depth calculator that interpolates waterlevel linearly between nodes.
+class InterpolatedLevelDepthCalculator(Calculator):
+    """Return waterdepth array.
 
-    Args:
-        dem_geo_transform: (tuple) Geo_transform of the dem.
-        gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to results_3di.nc file.
-        calculation_step (int): Calculation step for the waterdepth.
     """
-    INTERPOLATOR = "interpolator"
+    def __call__(self, indices, values, no_data_value):
+        """Return waterdepth array.
 
-    def __init__(self, dem_geo_transform, **kwargs):
-        super().__init__(**kwargs)
-        self.dem_geo_transform = dem_geo_transform
-
-    def __call__(self, offset, values, no_data_value):
-        """Do:
-        get node centers and s1, make an NDInterpolator object
-        no_data? Only defined nodes?
-        Evaluate at this grid (need coordinates for this piece)
         """
-        # get or create the interpolator
-        if self.INTERPOLATOR in self.cache:
-            interpolator = self.cache[INTERPOLATOR]
-        else:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=[self.calculation_step])
-            data = timeseries.only("s1", "coordinates").data
-            points = None
-            values = None
-            import ipdb
-            ipdb.set_trace()
-            interpolator = LinearNDInterpolator(
-                points,
-                values,
-                fill_value=no_data_value
-            )
+        points = self._get_points(indices)
+        waterlevel = self.interpolator(points)
 
-        return values
+        return self._depth(
+            dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
+        )
 
 
 class TiffConverter:
     """Convert tiff, applying a calculating function to the data.
 
     """
-    def __init__(self, source_path, target_path):
+    def __init__(self, source_path, target_path, progress_func):
         self.source_path = source_path
         self.target_path = target_path
+        self.progress_func = progress_func
 
     def __enter__(self):
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
+
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
+        block_x_size, block_y_size = self.block_size
+        options = [
+            "compress=deflate",
+            "blockysize=%s" % block_y_size,
+        ]
+        if block_x_size != self.raster_x_size:
+            options += [
+                "tiled=yes",
+                "blockxsize=%s" % block_x_size,
+            ]
 
         self.target = gdal.GetDriverByName("gtiff").Create(
             self.target_path,
@@ -187,11 +240,7 @@ class TiffConverter:
             self.raster_y_size,
             1,  # band count
             self.source.GetRasterBand(1).DataType,
-            options=[
-                "compress=deflate",
-                "blockxsize=%s" % self.block_size[0],
-                "blockysize=%s" % self.block_size[1],
-            ],
+            options=options,
         )
         self.target.SetProjection(self.projection)
         self.target.SetGeoTransform(self.geo_transform)
@@ -244,14 +293,16 @@ class TiffConverter:
             for start in range(0, stop, step):
                 yield start, min(step, stop - start)
 
-        raster_size = self.raster_x_size, self.raster_y_size
-        block_size = self.block_size
+        # tiled tiff writing is much faster row-wise
+        raster_size = self.raster_y_size, self.raster_x_size
+        block_size = self.block_size[::-1]
         generator = product(*map(offset_size_range, raster_size, block_size))
 
         total = len(self)
         for count, result in enumerate(generator, start=1):
-            yield result
-            gdal.TermProgress_nocb(count / total)
+            yield result[::-1]
+            if self.progress_func is not None:
+                self.progress_func(count / total)
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
@@ -262,9 +313,9 @@ class TiffConverter:
             values = self.source.ReadAsArray(
                 xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize,
             )
-
+            indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
             result = calculator(
-                offset=(yoff, xoff),
+                indices=indices,
                 values=values,
                 no_data_value=no_data_value,
             )
@@ -274,13 +325,22 @@ class TiffConverter:
             )
 
 
+calculator_classes = {
+    MODE_COPY: CopyCalculator,
+    MODE_NODGRID: NodGridCalculator,
+    MODE_INTERPOLATE: InterpolatedLevelDepthCalculator,
+    MODE_CONSTANT: ConstantLevelDepthCalculator,
+}
+
+
 def calculate_waterdepth(
-    gridadmin_path=GRIDADMIN_PATH,
-    results_3di_path=RESULTS_3DI_PATH,
-    dem_path=DEM_PATH,
-    waterdepth_path=WATERDEPTH_PATH,
+    gridadmin_path,
+    results_3di_path,
+    dem_path,
+    waterdepth_path,
     calculation_step=-1,
-    interpolate=False,
+    mode=MODE_INTERPOLATE,
+    progress_func=None,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
 
@@ -289,35 +349,46 @@ def calculate_waterdepth(
         results_3di_path (str): Path to results_3di.nc file.
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
-        calculation_step (int): Calculation step for the waterdepth.
+        calculation_step (int): Calculation step (default: -1 (last))
         interpolate (bool): Interpolate linearly between nodes.
     """
-    fix_gridadmin(GRIDADMIN_PATH)  # TODO newer versions of the h5 are fixed.
+    # TODO remove at some point, newly produced gridadmins don't need it
+    fix_gridadmin(gridadmin_path)
 
     converter_kwargs = {
         "source_path": dem_path,
         "target_path": waterdepth_path,
+        "progress_func": progress_func,
     }
 
-    # CalculatorClass = BaseCalculator
-
     with TiffConverter(**converter_kwargs) as converter:
+        try:
+            CalculatorClass = calculator_classes[mode]
+        except KeyError:
+            raise ValueError("Unknown mode: '%s'" % mode)
+
         calculator_kwargs = {
             "gridadmin_path": gridadmin_path,
             "results_3di_path": results_3di_path,
             "calculation_step": calculation_step,
+            "dem_geo_transform": converter.geo_transform,
+            "dem_pixelsize": converter.geo_transform[1],
+            "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
-        if interpolate:
-            CalculatorClass = InterpolatedLevelDepthCalculator
-            calculator_kwargs['dem_geo_transform'] = converter.geo_transform
-        else:
-            CalculatorClass = ConstantLevelDepthCalculator
-            calculator_kwargs['dem_pixelsize'] = converter.geo_transform[1]
-            calculator_kwargs['dem_shape'] = (
-                converter.raster_y_size, converter.raster_x_size,
-            )
         with CalculatorClass(**calculator_kwargs) as calculator:
             converter.convert_using(calculator)
 
 
-calculate_waterdepth(interpolate=True)
+GRIDADMIN_PATH = "var/testdata/12997/gridadmin.h5"
+DEM_PATH = "var/testdata/12997/dem_tiled.tif"
+RESULTS_3DI_PATH = "var/testdata/12997/results_3di.nc"
+WATERDEPTH_PATH = "waterdepth.tif"
+
+calculate_waterdepth(
+    gridadmin_path=GRIDADMIN_PATH,
+    results_3di_path=RESULTS_3DI_PATH,
+    dem_path=DEM_PATH,
+    waterdepth_path=WATERDEPTH_PATH,
+    mode=MODE_CONSTANT,
+    progress_func=gdal.TermProgress_nocb,
+)
