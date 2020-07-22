@@ -14,8 +14,10 @@ from threedidepth.fixes import fix_gridadmin
 
 MODE_COPY = "copy"
 MODE_NODGRID = "nodgrid"
-MODE_INTERPOLATE = "interpolate"
-MODE_CONSTANT = "cell"
+MODE_CONSTANT_S1 = "constant-s1"
+MODE_INTERPOLATED_S1 = "interpolated-s1"
+MODE_CONSTANT = "constant"
+MODE_INTERPOLATED = "interpolated"
 
 
 class Calculator:
@@ -67,13 +69,13 @@ class Calculator:
         raise NotImplementedError
 
     @staticmethod
-    def _depth_from_level(dem, fillvalue, waterlevel):
+    def _depth_from_water_level(dem, fillvalue, waterlevel):
         # determine depth
         depth = np.full_like(dem, fillvalue)
         dem_active = (dem != fillvalue)
         waterlevel_active = (waterlevel != NO_DATA_VALUE)
         active = dem_active & waterlevel_active
-        depth_1d = waterlevel[active] - depth[active]
+        depth_1d = waterlevel[active] - dem[active]
 
         # paste positive depths only
         negative_1d = (depth_1d <= 0)
@@ -104,7 +106,7 @@ class Calculator:
             timeseries = nodes.timeseries(indexes=[self.calculation_step])
             data = timeseries.only("s1", "coordinates").data
             points = data["coordinates"].transpose()
-            values = data["coordinates"][0]
+            values = data["s1"][0]
             interpolator = LinearNDInterpolator(
                 points,
                 values,
@@ -152,7 +154,7 @@ class Calculator:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
         (i1, j1), (i2, j2) = indices
-        local_ji = np.mgrid[j1:j2, i1:i2].reshape(2, -1).transpose()
+        local_ji = np.mgrid[i1:i2, j1:j2].reshape(2, -1)[::-1].transpose()
         p, a, b, q, c, d = self.dem_geo_transform
         return local_ji * [a, d] + [p, q]
 
@@ -167,44 +169,44 @@ class Calculator:
 
 
 class CopyCalculator(Calculator):
-    """Return input values.
-
-    """
     def __call__(self, indices, values, no_data_value):
+        """Return input values unmodified."""
         return values
 
 
 class NodGridCalculator(Calculator):
-    """Return node grid.
-
-    """
     def __call__(self, indices, values, no_data_value):
+        """Return node grid."""
         return self._get_nodgrid(indices)
 
 
-class ConstantLevelDepthCalculator(Calculator):
-    """Return waterdepth array.
-
-    """
+class ConstantLevelCalculator(Calculator):
     def __call__(self, indices, values, no_data_value):
-        waterlevel = self.lookup_s1[self._get_nodgrid(indices)]
-        return self._depth_from_level(
+        """Return waterlevel array."""
+        return self.lookup_s1[self._get_nodgrid(indices)]
+
+
+class InterpolatedLevelCalculator(Calculator):
+    def __call__(self, indices, values, no_data_value):
+        """Return waterlevel array."""
+        points = self._get_points(indices)
+        return self.interpolator(points).reshape(values.shape)
+
+
+class ConstantLevelDepthCalculator(ConstantLevelCalculator):
+    def __call__(self, indices, values, no_data_value):
+        """Return waterdepth array."""
+        waterlevel = super().__call__(indices, values, no_data_value)
+        return self._depth_from_water_level(
             dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
         )
 
 
-class InterpolatedLevelDepthCalculator(Calculator):
-    """Return waterdepth array.
-
-    """
+class InterpolatedLevelDepthCalculator(InterpolatedLevelCalculator):
     def __call__(self, indices, values, no_data_value):
-        """Return waterdepth array.
-
-        """
-        points = self._get_points(indices)
-        waterlevel = self.interpolator(points)
-
-        return self._depth(
+        """Return waterdepth array."""
+        waterlevel = super().__call__(indices, values, no_data_value)
+        return self._depth_from_water_level(
             dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
         )
 
@@ -310,6 +312,10 @@ class TiffConverter:
             raise TypeError("calculator must be of the Calculator type.")
         no_data_value = self.no_data_value
         for (xoff, xsize), (yoff, ysize) in self.partition():
+            # begin test hack
+            if yoff + ysize < 14 * 256 or yoff > 17 * 256:
+                continue
+            # end test hack
             values = self.source.ReadAsArray(
                 xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize,
             )
@@ -328,8 +334,10 @@ class TiffConverter:
 calculator_classes = {
     MODE_COPY: CopyCalculator,
     MODE_NODGRID: NodGridCalculator,
-    MODE_INTERPOLATE: InterpolatedLevelDepthCalculator,
+    MODE_CONSTANT_S1: ConstantLevelCalculator,
+    MODE_INTERPOLATED_S1: InterpolatedLevelCalculator,
     MODE_CONSTANT: ConstantLevelDepthCalculator,
+    MODE_INTERPOLATED: InterpolatedLevelDepthCalculator,
 }
 
 
@@ -339,7 +347,7 @@ def calculate_waterdepth(
     dem_path,
     waterdepth_path,
     calculation_step=-1,
-    mode=MODE_INTERPOLATE,
+    mode=MODE_INTERPOLATED,
     progress_func=None,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
@@ -376,19 +384,5 @@ def calculate_waterdepth(
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
         with CalculatorClass(**calculator_kwargs) as calculator:
+            print(calculator)
             converter.convert_using(calculator)
-
-
-GRIDADMIN_PATH = "var/testdata/12997/gridadmin.h5"
-DEM_PATH = "var/testdata/12997/dem_tiled.tif"
-RESULTS_3DI_PATH = "var/testdata/12997/results_3di.nc"
-WATERDEPTH_PATH = "waterdepth.tif"
-
-calculate_waterdepth(
-    gridadmin_path=GRIDADMIN_PATH,
-    results_3di_path=RESULTS_3DI_PATH,
-    dem_path=DEM_PATH,
-    waterdepth_path=WATERDEPTH_PATH,
-    mode=MODE_CONSTANT,
-    progress_func=gdal.TermProgress_nocb,
-)
