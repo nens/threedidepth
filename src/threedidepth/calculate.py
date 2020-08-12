@@ -211,19 +211,28 @@ class InterpolatedLevelDepthCalculator(InterpolatedLevelCalculator):
         )
 
 
-class TiffConverter:
+class GeoTIFFConverter:
     """Convert tiff, applying a calculating function to the data.
 
+    Args:
+        source_path (str): Path to source GeoTIFF file.
+        target_path (str): Path to target GeoTIFF file.
+        progress_func: a callable.
+
+        The progress_func will be called multiple times with values between 0.0
+        amd 1.0.
     """
-    def __init__(self, source_path, target_path, progress_func):
+    def __init__(self, source_path, target_path, progress_func=None):
         self.source_path = source_path
         self.target_path = target_path
         self.progress_func = progress_func
 
-    def __enter__(self):
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
 
+    def __enter__(self):
+        """Open datasets.
+        """
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         block_x_size, block_y_size = self.block_size
         options = [
@@ -253,7 +262,6 @@ class TiffConverter:
     def __exit__(self, *args):
         """Close datasets.
 
-        TODO check if actually needed
         """
         self.source = None
         self.target = None
@@ -308,14 +316,12 @@ class TiffConverter:
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
-        if not isinstance(calculator, Calculator):
-            raise TypeError("calculator must be of the Calculator type.")
         no_data_value = self.no_data_value
         for (xoff, xsize), (yoff, ysize) in self.partition():
-            # begin test hack
-            if yoff + ysize < 14 * 256 or yoff > 17 * 256:
-                continue
-            # end test hack
+            # # begin test hack
+            # if yoff + ysize < 14 * 256 or yoff > 17 * 256:
+                # continue
+            # # end test hack
             values = self.source.ReadAsArray(
                 xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize,
             )
@@ -360,6 +366,11 @@ def calculate_waterdepth(
         calculation_step (int): Calculation step (default: -1 (last))
         interpolate (bool): Interpolate linearly between nodes.
     """
+    try:
+        CalculatorClass = calculator_classes[mode]
+    except KeyError:
+        raise ValueError("Unknown mode: '%s'" % mode)
+
     # TODO remove at some point, newly produced gridadmins don't need it
     fix_gridadmin(gridadmin_path)
 
@@ -369,11 +380,7 @@ def calculate_waterdepth(
         "progress_func": progress_func,
     }
 
-    with TiffConverter(**converter_kwargs) as converter:
-        try:
-            CalculatorClass = calculator_classes[mode]
-        except KeyError:
-            raise ValueError("Unknown mode: '%s'" % mode)
+    with GeoTIFFConverter(**converter_kwargs) as converter:
 
         calculator_kwargs = {
             "gridadmin_path": gridadmin_path,
@@ -384,5 +391,4 @@ def calculate_waterdepth(
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
         with CalculatorClass(**calculator_kwargs) as calculator:
-            print(calculator)
             converter.convert_using(calculator)

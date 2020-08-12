@@ -7,7 +7,7 @@ GRIDADMIN_PATH = "var/testdata/12997/gridadmin.h5"
 RESULTS_3DI_PATH = "var/testdata/12997/results_3di.nc"
 
 
-def test():
+def skirmish():
     f = GRIDADMIN_PATH
     nc = RESULTS_3DI_PATH
     # init gives warning:
@@ -35,7 +35,7 @@ def test():
 
     # We'll have to resort to indexed steps. Negative works, slices too.
     qs = gr.nodes.timeseries(indexes=[-4, -3, -2, -1])
-   assert len(qs.s1) == 4
+    assert len(qs.s1) == 4
 
     # now what, via the bounds?
     gr.cells.subset('2D_OPEN_WATER').bounds  # ?
@@ -50,4 +50,4 @@ def test():
     return gr
 
 
-test()
+skirmish()
