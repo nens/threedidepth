@@ -13,6 +13,7 @@ from pytest import mark
 import numpy as np
 
 
+from threedidepth.calculate import Calculator
 from threedidepth.calculate import GeoTIFFConverter
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import calculator_classes
@@ -22,6 +23,7 @@ from threedidepth.calculate import MODE_CONSTANT_S1
 from threedidepth.calculate import MODE_INTERPOLATED_S1
 from threedidepth.calculate import MODE_CONSTANT
 from threedidepth.calculate import MODE_INTERPOLATED
+from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 
@@ -151,25 +153,78 @@ def test_calculate_waterdepth(source_path, target_path, admin):
 
 
 data = (
-    (calculator_classes[MODE_COPY], None),
-    (calculator_classes[MODE_NODGRID], None),
-    (calculator_classes[MODE_CONSTANT_S1], None),
-    (calculator_classes[MODE_INTERPOLATED_S1], None),
-    (calculator_classes[MODE_CONSTANT], None),
-    (calculator_classes[MODE_INTERPOLATED], None),
+    (MODE_COPY, None),
+    (MODE_NODGRID, None),
+    (MODE_CONSTANT_S1, None),
+    (MODE_INTERPOLATED_S1, None),
+    (MODE_CONSTANT, None),
+    (MODE_INTERPOLATED, None),
 )
 
 
-@mark.parametrize("calculator_class, expected", data)
-def test_calculators(calculator_class, expected, admin):
-    calculator = calculator_class(
-        gridadmin_path="dummy",
-        results_3di_path="dummy",
-        calculation_step=-1,
-        dem_shape=(2, 2),
-        dem_geo_transform=(0, 1, 0, 0, 0, 1),
-        dem_pixelsize=1,
-    )
-    values = np.arange(4).reshape(2, 2)
-    calculator(values, )
-    
+@mark.parametrize("mode, expected", data)
+def test_calculators(mode, expected, admin):
+    # prepare gridadmin uses
+    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
+        pixel_map = np.arange(24).reshape(4, 6)
+        admin.grid.get_pixel_map.return_value = pixel_map
+    if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
+        data = {
+            "coordinates": np.array([[5, 7, 7, 5], [5, 5, 7, 7]]),
+            "s1": np.array([[2, 0, 0, -2]]),
+        }
+        admin.nodes.subset().timeseries().only().data = data
+    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
+        data = {
+            "id": np.arange(24),
+            "s1": np.array([[
+                7, 7, 7, 7, 7, 7,
+                7, 7, 7, 7, 7, 7,
+                7, 7, 7, 7, -2, 0,
+                7, 7, 7, 7, 2, 0,
+            ]]),
+        }
+        admin.nodes.subset().timeseries().only().data = data
+
+    calculator_kwargs = {
+        "gridadmin_path": "dummy",
+        "results_3di_path": "dummy",
+        "calculation_step": -1,
+        "dem_shape": (4, 6),
+        "dem_geo_transform": (4, 2, 0, 8, 0, -2),
+        "dem_pixelsize": 2,
+    }
+
+    no_data_value = -9
+    call_kwargs = {
+        "no_data_value": no_data_value,
+        "values": np.array([[-1, 0], [1, no_data_value]]),
+        "indices": ((2, 4), (4, 6)),
+    }
+
+    CalculatorClass = calculator_classes[mode]
+    with CalculatorClass(**calculator_kwargs) as calculator:
+        result = calculator(**call_kwargs)
+
+    # check gridadmin uses
+    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_INTERPOLATED_S1):
+        assert admin.grid.get_pixel_map.called_with(
+            dem_pixel_size=1, dem_shape=(2, 2),
+        )
+    if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
+        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries().only.assert_called_with(
+            "s1", "coordinates",
+        )
+    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
+        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries().only.assert_called_with(
+            "s1", "id",
+        )
+
+
+def test_calculator_not_implemented():
+    with raises(NotImplementedError):
+        Calculator("", "", "", "", "", "")("", "", "")
