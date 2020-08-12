@@ -1,6 +1,11 @@
+# -*- encoding: utf-8 -*-
+from glob import glob
+from os.path import basename
+from os.path import splitext
+from setuptools import find_packages
 from setuptools import setup
 
-version='0.1.dev0'
+version = '0.1.dev0'
 
 with open('README.rst') as readme_file:
     readme = readme_file.read()
@@ -18,6 +23,7 @@ install_requires = [
 
 tests_require = ["flake8", "ipdb", "ipython", "pytest", "pytest-cov"]
 
+
 setup(
     name='threedidepth',
     version=version,
@@ -26,20 +32,10 @@ setup(
     author="Arjan Verkerk",
     author_email='arjan.verkerk@nelen-schuurmans.nl',
     python_requires='>=3.5',
-    classifiers=[
-        'Development Status :: 2 - Pre-Alpha',
-        'Intended Audience :: Developers',
-        'License :: OSI Approved :: BSD License',
-        'Natural Language :: English',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-    ],
-    license="BSD license",
     keywords=['threedidepth'],
-    packages=["threedidepth"],
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
+    py_modules=[splitext(basename(path))[0] for path in glob('src/*.py')],
     test_suite='tests',
     url='https://github.com/nens/threedidepth',
     include_package_data=True,
