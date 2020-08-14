@@ -5,13 +5,13 @@ from unittest import mock
 import random
 import string
 
+from numpy.testing import assert_almost_equal
 from osgeo import gdal
 from osgeo import osr
 from pytest import fixture
-from pytest import raises
 from pytest import mark
+from pytest import raises
 import numpy as np
-
 
 from threedidepth.calculate import Calculator
 from threedidepth.calculate import GeoTIFFConverter
@@ -26,6 +26,7 @@ from threedidepth.calculate import MODE_INTERPOLATED
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
+NDV = -9  # no data value of the test dem
 
 
 def random_slug(size):
@@ -66,7 +67,7 @@ def source_path(request):
     source = gdal.GetDriverByName("mem").Create(
         "", width, height, bands, data_type,
     )
-    # source.SetGeoTransform(0, 1, 0, 0, 0, 1)
+    source.SetGeoTransform((0, 1, 0, 128, 0, -1))
     source.SetProjection(RD)
     source_band = source.GetRasterBand(1)
     source_band.SetNoDataValue(-9)
@@ -153,37 +154,46 @@ def test_calculate_waterdepth(source_path, target_path, admin):
 
 
 data = (
-    (MODE_COPY, None),
-    (MODE_NODGRID, None),
-    (MODE_CONSTANT_S1, None),
-    (MODE_INTERPOLATED_S1, None),
-    (MODE_CONSTANT, None),
-    (MODE_INTERPOLATED, None),
+    (MODE_COPY, np.array([[NDV, 2.0], [2.0, 2.0]])),
+    (MODE_NODGRID, np.array([[6, 7], [8, 9]])),
+    (MODE_CONSTANT_S1, np.array([[2.3, 2.2], [2.1, 2.0]])),
+    (MODE_INTERPOLATED_S1, np.array([[2.3, 2.2], [2.1, 2.1]])),
+    (MODE_CONSTANT, np.array([[NDV, 0.2], [0.1, NDV]])),
+    (MODE_INTERPOLATED, np.array([[NDV, 0.2], [0.1, 0.1]])),
 )
 
 
 @mark.parametrize("mode, expected", data)
 def test_calculators(mode, expected, admin):
+    # indices and geo_transform make the values lie in a (6, 4), (10, 8) bbox
+    indices = ((1, 2), (3, 4))
+    geo_transform = (2, 2, 0, 10, 0, -2)
+    pixel_map = np.array([
+        [1, 2, 3, 4],
+        [5, 5, 6, 7],
+        [5, 5, 8, 9],
+    ])
+    s1 = np.array([[1.0, 1.0, 1.0, 1.0, 1.0, 2.3, 2.2, 2.1, 2.0]])
+    ids = np.arange(1, 10)
+    coordinates = np.array([
+        [3, 5, 7, 9, 4, 7, 9, 7, 9],
+        [9, 9, 9, 9, 6, 7, 7, 5, 3],  # last node pulled down one cell
+    ])
+
+    # dem values
+    values = np.array([
+        [NDV, 2.0],
+        [2.0, 2.0],
+    ])
+
     # prepare gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        pixel_map = np.arange(24).reshape(4, 6)
         admin.grid.get_pixel_map.return_value = pixel_map
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
-        data = {
-            "coordinates": np.array([[5, 7, 7, 5], [5, 5, 7, 7]]),
-            "s1": np.array([[2, 0, 0, -2]]),
-        }
+        data = {"coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
     if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
-        data = {
-            "id": np.arange(24),
-            "s1": np.array([[
-                7, 7, 7, 7, 7, 7,
-                7, 7, 7, 7, 7, 7,
-                7, 7, 7, 7, -2, 0,
-                7, 7, 7, 7, 2, 0,
-            ]]),
-        }
+        data = {"id": ids, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
 
     calculator_kwargs = {
@@ -191,20 +201,20 @@ def test_calculators(mode, expected, admin):
         "results_3di_path": "dummy",
         "calculation_step": -1,
         "dem_shape": (4, 6),
-        "dem_geo_transform": (4, 2, 0, 8, 0, -2),
+        "dem_geo_transform": geo_transform,
         "dem_pixelsize": 2,
     }
 
-    no_data_value = -9
     call_kwargs = {
-        "no_data_value": no_data_value,
-        "values": np.array([[-1, 0], [1, no_data_value]]),
-        "indices": ((2, 4), (4, 6)),
+        "no_data_value": NDV,
+        "values": values,
+        "indices": indices,
     }
 
     CalculatorClass = calculator_classes[mode]
     with CalculatorClass(**calculator_kwargs) as calculator:
         result = calculator(**call_kwargs)
+    assert_almost_equal(result, expected)
 
     # check gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_INTERPOLATED_S1):

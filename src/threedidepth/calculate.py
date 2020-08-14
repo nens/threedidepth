@@ -156,7 +156,7 @@ class Calculator:
         (i1, j1), (i2, j2) = indices
         local_ji = np.mgrid[i1:i2, j1:j2].reshape(2, -1)[::-1].transpose()
         p, a, b, q, c, d = self.dem_geo_transform
-        return local_ji * [a, d] + [p, q]
+        return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
     def __enter__(self):
         self.gr = GridH5ResultAdmin(self.gridadmin_path, self.results_3di_path)
@@ -318,10 +318,6 @@ class GeoTIFFConverter:
         """Convert data writing it to tiff. """
         no_data_value = self.no_data_value
         for (xoff, xsize), (yoff, ysize) in self.partition():
-            # # begin test hack
-            # if yoff + ysize < 14 * 256 or yoff > 17 * 256:
-                # continue
-            # # end test hack
             values = self.source.ReadAsArray(
                 xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize,
             )
