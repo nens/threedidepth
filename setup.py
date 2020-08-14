@@ -15,10 +15,11 @@ with open('CHANGES.rst') as changes_file:
 
 install_requires = [
     "threedigrid",
-    "gdal",
+    # "gdal",  # assumed available
     "numpy",
-    "numba",  # missing dependency in threedigrid 1.0.20.9
-    "h5py",  # explicit because of the gridadmin fix
+    "scipy",
+    # "numba",  # missing dependency in threedigrid 1.0.20.9
+    # "h5py",  # explicit because of the gridadmin fix
 ]
 
 tests_require = ["flake8", "ipdb", "ipython", "pytest", "pytest-cov"]
@@ -36,7 +37,7 @@ setup(
     packages=find_packages('src'),
     package_dir={'': 'src'},
     py_modules=[splitext(basename(path))[0] for path in glob('src/*.py')],
-    test_suite='tests',
+    test_suite='test',
     url='https://github.com/nens/threedidepth',
     include_package_data=True,
     zip_safe=False,
