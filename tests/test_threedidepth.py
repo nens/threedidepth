@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from unittest import mock
 import random
 import string
+import sys
 
 from numpy.testing import assert_almost_equal
 from osgeo import gdal
@@ -24,6 +25,7 @@ from threedidepth.calculate import MODE_INTERPOLATED_S1
 from threedidepth.calculate import MODE_CONSTANT
 from threedidepth.calculate import MODE_INTERPOLATED
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
+from threedidepth.commands import threedidepth
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 NDV = -9  # no data value of the test dem
@@ -139,6 +141,34 @@ def test_calculate_waterdepth_wrong_mode():
             dem_path="dummy",
             waterdepth_path="dummy",
             mode="wrong",
+        )
+
+
+def test_command(tmpdir):
+    depth_path = tmpdir.join("waterdepth.tif")
+    depth_path.ensure(file=True)  # "touch" the file
+    with mock.patch("threedidepth.commands.calculate_waterdepth") as wd:
+        args = ["threedidepth,", "a", "b", "c", "d"]
+        with mock.patch.object(sys, "argv", args):
+            threedidepth()
+        assert wd.called_with(
+            gridadmin_path="a",
+            resultes_3di_path="b",
+            dem_path="c",
+            waterdepth_path="d",
+            calculation_step=-1,
+            mode=MODE_INTERPOLATED,
+        )
+        args.append("--constant")
+        with mock.patch.object(sys, "argv", args):
+            threedidepth()
+        assert wd.called_with(
+            gridadmin_path="a",
+            resultes_3di_path="b",
+            dem_path="c",
+            waterdepth_path="d",
+            calculation_step=-1,
+            mode=MODE_CONSTANT,
         )
 
 

@@ -1,4 +1,4 @@
 threedidepth
 ============
 
-Calculate waterdepths for 3Di results.      
+Calculate waterdepths for 3Di results.
