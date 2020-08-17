@@ -33,4 +33,4 @@ jobs:
         run: docker-compose run --rm lib .venv/bin/pytest
 
       - name: Flake8
-        run: if docker-compose run --rm lib .venv/bin/flake8 raster_store > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi
+        run: if docker-compose run --rm lib .venv/bin/flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi

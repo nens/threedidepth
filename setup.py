@@ -22,7 +22,7 @@ install_requires = [
     # "h5py",  # explicit because of the gridadmin fix
 ]
 
-tests_require = ["flake8", "ipdb", "ipython", "pytest", "pytest-cov"]
+tests_require = ["flake8", "pytest", "pytest-cov"]
 
 
 setup(
