@@ -1,9 +1,0 @@
-include CHANGES.rst
-include LICENSE
-include README.rst
-exclude var
-
-
-recursive-include test *
-recursive-exclude * __pycache__
-recursive-exclude * *.py[co]

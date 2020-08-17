@@ -218,7 +218,8 @@ def test_calculators(mode, expected, admin):
 
     # prepare gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        admin.grid.get_pixel_map.return_value = pixel_map
+        # admin.grid.get_pixel_map.return_value = pixel_map  # old style
+        admin.cells.get_nodgrid.return_value = pixel_map[1:3, 2:4]
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
         data = {"coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
@@ -247,9 +248,13 @@ def test_calculators(mode, expected, admin):
     assert_almost_equal(result, expected)
 
     # check gridadmin uses
-    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_INTERPOLATED_S1):
-        assert admin.grid.get_pixel_map.called_with(
-            dem_pixel_size=1, dem_shape=(2, 2),
+    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
+        # admin.grid.get_pixel_map.assert_called_once_with(
+        #     dem_pixel_size=1, dem_shape=(2, 2),
+        # )  # old style
+        admin.cells.get_nodgrid.assert_called_once_with(
+            [x for y in indices for x in y[::-1]],
+            subset_name=SUBSET_2D_OPEN_WATER,
         )
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
