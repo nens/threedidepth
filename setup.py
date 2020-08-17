@@ -15,7 +15,7 @@ with open('CHANGES.rst') as changes_file:
 
 install_requires = [
     "threedigrid",
-    # "gdal",  # assumed available
+    # "gdal",  # assumed available via virtualenv --system-site-packages
     "numpy",
     "scipy",
     # "numba",  # missing dependency in threedigrid 1.0.20.9
