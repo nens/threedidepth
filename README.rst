@@ -20,9 +20,14 @@ $ pip install threedidepth  # TODO, we're not yet on pypi
 Usage
 -----
 
-$ threedidepth gridadmin.h5 results_3di.nc dem.tif waterdepth.tif
+From the cli::
 
->>> threedidepth.calculate_waterdepth(...)
+    $ threedidepth gridadmin.h5 results_3di.nc dem.tif waterdepth.tif
+
+
+Or python::
+
+    >>> threedidepth.calculate_waterdepth(...)
 
 
 Development installation with docker-compose
@@ -46,16 +51,3 @@ Install dependencies & package and run tests::
     (docker)(virtualenv)$ pip install -r requirements.txt
     (docker)(virtualenv)$ pip install -e .[test]
     (docker)(virtualenv)$ pytest
-
-Update requirements.txt::
-    
-    (docker)$ deactivate
-    (docker)$ rm -rf .venv
-    (docker)$ virtualenv .venv
-    (docker)$ source .venv/bin/activate
-    (docker)(virtualenv)$ pip install .
-    (docker)(virtualenv)$ pip install pygdal==2.2.3.*
-    (docker)(virtualenv)$ pip uninstall raster-store --yes
-    (docker)(virtualenv)$ pip freeze > requirements.txt
-
-
