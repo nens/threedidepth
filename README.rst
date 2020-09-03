@@ -14,7 +14,7 @@ Installation
 
 Make sure GDAL is available as (`from osgeo import gdal`)
 
-$ pip install threedidepth  # TODO, we're not yet on pypi
+$ pip install threedidepth
 
 
 Usage
@@ -33,7 +33,7 @@ Or python::
 Development installation with docker-compose
 --------------------------------------------
 
-For development, you can use a docker-compose setup::
+For development, clone the repository and use a docker-compose setup::
 
     $ docker-compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
     $ docker-compose up --no-start
