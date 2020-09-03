@@ -4,4 +4,4 @@ numba==0.51.0
 numpy==1.19.1
 scipy==1.5.2
 six==1.15.0
--e git+https://github.com/nens/threedigrid.git@9b98622d3b633ce6d1eeb4db7b096a5e61076641#egg=threedigrid
+threedigrid==1.0.24

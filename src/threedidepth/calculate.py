@@ -115,26 +115,6 @@ class Calculator:
             self.cache[self.INTERPOLATOR] = interpolator
             return interpolator
 
-    # @property
-    # def pixel_map(self):  # old style
-        # try:
-            # return self.cache[self.PIXEL_MAP]
-        # except KeyError:
-            # pixel_map = self.gr.grid.get_pixel_map(
-            #     dem_pixelsize=self.dem_pixelsize, dem_shape=self.dem_shape,
-            # )
-            # self.cache[self.PIXEL_MAP] = pixel_map
-            # return pixel_map
-
-    # def _get_nodgrid(self, indices):  # old style
-        # """Return node grid.
-
-        # Args:
-            # indices (tuple): ((i1, j1), (i2, j2)) subarray indices
-        # """
-        # (i1, j1), (i2, j2) = indices
-        # return self.pixel_map[i1:i2, j1:j2]
-
     def _get_nodgrid(self, indices):
         """Return node grid.
 
