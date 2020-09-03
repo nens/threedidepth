@@ -18,8 +18,7 @@ install_requires = [
     # "gdal",  # assumed available via virtualenv --system-site-packages
     "numpy",
     "scipy",
-    # "numba",  # missing dependency in threedigrid 1.0.20.9
-    # "h5py",  # explicit because of the gridadmin fix
+    "h5py",  # explicit because of the gridadmin fix
 ]
 
 tests_require = ["flake8", "pytest", "pytest-cov"]
