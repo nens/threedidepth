@@ -26,11 +26,21 @@ tests_require = ["flake8", "pytest", "pytest-cov"]
 
 setup(
     name='threedidepth',
-    version=version,
     description="Calculate waterdepths for 3Di results.",
-    long_description=readme + '\n\n' + changes,
+    version=version,
     author="Arjan Verkerk",
     author_email='arjan.verkerk@nelen-schuurmans.nl',
+    license="BSD license",
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: BSD License',
+        'Natural Language :: English',
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
+        'Topic :: Scientific/Engineering',
+    ],
+    long_description=readme + '\n\n' + changes,
     python_requires='>=3.5',
     keywords=['threedidepth'],
     packages=find_packages('src'),
