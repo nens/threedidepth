@@ -198,7 +198,7 @@ def test_calculators(mode, expected, admin):
     # indices and geo_transform make the values lie in a (6, 4), (10, 8) bbox
     indices = ((1, 2), (3, 4))
     geo_transform = (2, 2, 0, 10, 0, -2)
-    pixel_map = np.array([
+    nodgrid = np.array([
         [1, 2, 3, 4],
         [5, 5, 6, 7],
         [5, 5, 8, 9],
@@ -218,8 +218,7 @@ def test_calculators(mode, expected, admin):
 
     # prepare gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        # admin.grid.get_pixel_map.return_value = pixel_map  # old style
-        admin.cells.get_nodgrid.return_value = pixel_map[1:3, 2:4]
+        admin.cells.get_nodgrid.return_value = nodgrid[1:3, 2:4]
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
         data = {"coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
@@ -233,7 +232,6 @@ def test_calculators(mode, expected, admin):
         "calculation_step": -1,
         "dem_shape": (4, 6),
         "dem_geo_transform": geo_transform,
-        "dem_pixelsize": 2,
     }
 
     call_kwargs = {
@@ -249,11 +247,9 @@ def test_calculators(mode, expected, admin):
 
     # check gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        # admin.grid.get_pixel_map.assert_called_once_with(
-        #     dem_pixel_size=1, dem_shape=(2, 2),
-        # )  # old style
+        # get_nodgrid() wants (1, 2), (3, 4) flipped & transposed
         admin.cells.get_nodgrid.assert_called_once_with(
-            [x for y in indices for x in y[::-1]],
+            [2, 0, 4, 2],
             subset_name=SUBSET_2D_OPEN_WATER,
         )
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
@@ -272,4 +268,4 @@ def test_calculators(mode, expected, admin):
 
 def test_calculator_not_implemented():
     with raises(NotImplementedError):
-        Calculator("", "", "", "", "", "")("", "", "")
+        Calculator("", "", "", "", "")("", "", "")

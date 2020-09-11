@@ -27,7 +27,6 @@ class Calculator:
         gridadmin_path (str): Path to gridadmin.h5 file.
         results_3di_path (str): Path to results_3di.nc file.
         calculation_step (int): Calculation step for the waterdepth.
-        dem_pixelsize (float): Size of dem pixel in projected coordinates
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
     """
@@ -42,14 +41,12 @@ class Calculator:
         calculation_step,
         dem_shape,
         dem_geo_transform,
-        dem_pixelsize,
     ):
         self.gridadmin_path = gridadmin_path
         self.results_3di_path = results_3di_path
         self.calculation_step = calculation_step
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
-        self.dem_pixelsize = dem_pixelsize
 
     def __call__(self, indices, values, no_data_value):
         """Return result values array.
@@ -122,6 +119,11 @@ class Calculator:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
         (i1, j1), (i2, j2) = indices
+
+        # note that get_nodgrid() starts counting rows from the bottom
+        h = self.dem_shape[0]
+        i1, i2 = h - 1 - i2, h - 1 - i1
+
         # note that get_nodgrid() expects a columns-first bbox
         return self.gr.cells.get_nodgrid(
             [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER,
@@ -363,7 +365,6 @@ def calculate_waterdepth(
             "results_3di_path": results_3di_path,
             "calculation_step": calculation_step,
             "dem_geo_transform": converter.geo_transform,
-            "dem_pixelsize": converter.geo_transform[1],
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
         with CalculatorClass(**calculator_kwargs) as calculator:
