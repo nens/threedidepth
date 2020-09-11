@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.2 (unreleased)
 ----------------
 
-- Nothing changed yet.
+- Fix flipped nodgrid.
 
 
 0.1 (2020-09-03)
