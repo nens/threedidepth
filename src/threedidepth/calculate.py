@@ -273,12 +273,10 @@ class TestCalculator(Calculator):
         """
         interpolated = np.zeros(nr_points)
         difx = abs(Matrix[0][0]-Matrix[0][1])
-        for j in range(0,nr_points):
-            pt = points_in_subcell[j,:]
-            weight1 = 1 - abs(pt[0]-Matrix[0][0])/difx
-            weight2 = 1 - abs(pt[0]-Matrix[0][1])/difx
-            interpolated[j] = (weight1*water[0] + weight2*water[1])[0]
-        return interpolated
+        weight1 = 1 - abs(points_in_subcell[:,0]-Matrix[0][0])/difx
+        weight2 = 1 - abs(points_in_subcell[:,0]-Matrix[0][1])/difx
+        interpolated = (weight1*water[0] + weight2*water[1])
+        return interpolated   
     
     def average_y(points_in_subcell, nr_points, Matrix, water):
         """ 
@@ -286,11 +284,9 @@ class TestCalculator(Calculator):
         """
         interpolated = np.zeros(nr_points)
         dify = abs(Matrix[1][0]-Matrix[1][1])
-        for j in range(0,nr_points):
-            pt = points_in_subcell[j,:]
-            weight1 = 1 - abs(pt[1]-Matrix[1][0])/dify
-            weight2 = 1 - abs(pt[1]-Matrix[1][1])/dify
-            interpolated[j] = (weight1*water[0] + weight2*water[1])[0]
+        weight1 = 1 - abs(points_in_subcell[:,1]-Matrix[1][0])/dify
+        weight2 = 1 - abs(points_in_subcell[:,1]-Matrix[1][1])/dify
+        interpolated = (weight1*water[0] + weight2*water[1])
         return interpolated
 
     def barycentric_interpolated(points_in_subcell, waterlevels, triangle_indices, triangle_vertices, au, Matrix, no_data_value):
@@ -328,14 +324,10 @@ class TestCalculator(Calculator):
         else:
             modified_Matrix = np.matrix(modified_Matrix, dtype = 'float')
             C = np.array([waterlevels[triangle_indices[0][0][0]],waterlevels[triangle_indices[1]],waterlevels[triangle_indices[2][0][0]]])
-            interpolated = np.zeros(nr_points)
-            for j in range(0, nr_points):
-                pt = points_in_subcell[j,:]
-                rhs = np.array([[pt[0]],[pt[1]],[1]])
-                bary = np.linalg.inv(modified_Matrix)@rhs
-                Bary = [bary[0,0],bary[1,0],bary[2,0]]
-                interpolated[j] = np.dot(Bary, C)
-            return interpolated
+            grid = np.c_[points_in_subcell, np.ones(len(points_in_subcell)) ].transpose()
+            bary = np.dot(np.linalg.inv(modified_Matrix), grid)
+            interpolated = bary.transpose()@C
+                
         return interpolated
 
     def distance_interpolated(points_in_subcell, waterlevels, triangle_indices, triangle_vertices, au, Matrix, no_data_value):
@@ -377,20 +369,18 @@ class TestCalculator(Calculator):
         else:
             C = np.array([waterlevels[triangle_indices[0]],waterlevels[triangle_indices[1]],waterlevels[triangle_indices[2]]])
             interpolated = np.zeros(nr_points)
-            for j in range(0,nr_points):
-                pt = points_in_subcell[j,:]
-                dist_pt_1 = distance(pt,triangle_vertices[0][:])
-                dist_pt_2 = distance(pt,triangle_vertices[1][:])
-                dist_pt_3 = distance(pt,triangle_vertices[2][:])
-                total_dist = 3*(dist_pt_1 + dist_pt_2 + dist_pt_3)
-                frac1 = 1/dist_pt_1
-                frac2 = 1/dist_pt_2
-                frac3 = 1/dist_pt_3
-                total_frac = frac1+frac2+frac3
-                weight1 = frac1/total_frac
-                weight2 = frac2/total_frac
-                weight3 = frac3/total_frac
-                interpolated[j] = weight1*C[0] + weight2*C[1] + weight3*C[2]
+            dist_pt_1 = distance(points_in_subcell,triangle_vertices[0][:])
+            dist_pt_2 = distance(points_in_subcell,triangle_vertices[1][:])
+            dist_pt_3 = distance(points_in_subcell,triangle_vertices[2][:])
+            total_dist = 3*(dist_pt_1 + dist_pt_2 + dist_pt_3)
+            frac1 = 1/dist_pt_1
+            frac2 = 1/dist_pt_2
+            frac3 = 1/dist_pt_3
+            total_frac = frac1+frac2+frac3
+            weight1 = frac1/total_frac
+            weight2 = frac2/total_frac
+            weight3 = frac3/total_frac
+            interpolated = weight1*C[0] + weight2*C[1] + weight3*C[2]
             return interpolated
         return interpolated
              
