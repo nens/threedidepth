@@ -122,7 +122,7 @@ class Calculator:
 
         # note that get_nodgrid() starts counting rows from the bottom
         h = self.dem_shape[0]
-        i1, i2 = h - 1 - i2, h - 1 - i1
+        i1, i2 = h - i2, h - i1
 
         # note that get_nodgrid() expects a columns-first bbox
         return self.gr.cells.get_nodgrid(
