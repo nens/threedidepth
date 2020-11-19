@@ -230,7 +230,7 @@ def test_calculators(mode, expected, admin):
         "gridadmin_path": "dummy",
         "results_3di_path": "dummy",
         "calculation_step": -1,
-        "dem_shape": (4, 6),
+        "dem_shape": (3, 4),
         "dem_geo_transform": geo_transform,
     }
 
