@@ -43,4 +43,7 @@ docs/_build/
 
 # virtualenv
 .venv
+
+# IDEs
 .vscode
+.idea
