@@ -119,6 +119,7 @@ class Calculator:
 
     def _get_nodgrid(self, indices):
         """Return node grid.
+
         Args:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
@@ -135,12 +136,12 @@ class Calculator:
 
     def _get_points(self, indices):
         """Return points array.
+
         Args:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
         (i1, j1), (i2, j2) = indices
         local_ji = np.mgrid[i1:i2, j1:j2].reshape(2, -1)[::-1].transpose()
-
         p, a, b, q, c, d = self.dem_geo_transform
         return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
