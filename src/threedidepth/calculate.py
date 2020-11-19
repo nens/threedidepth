@@ -30,6 +30,7 @@ class Calculator:
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
     """
+
     PIXEL_MAP = "pixel_map"
     LOOKUP_S1 = "lookup_s1"
     INTERPOLATOR = "interpolator"
@@ -69,13 +70,13 @@ class Calculator:
     def _depth_from_water_level(dem, fillvalue, waterlevel):
         # determine depth
         depth = np.full_like(dem, fillvalue)
-        dem_active = (dem != fillvalue)
-        waterlevel_active = (waterlevel != NO_DATA_VALUE)
+        dem_active = dem != fillvalue
+        waterlevel_active = waterlevel != NO_DATA_VALUE
         active = dem_active & waterlevel_active
         depth_1d = waterlevel[active] - dem[active]
 
         # paste positive depths only
-        negative_1d = (depth_1d <= 0)
+        negative_1d = depth_1d <= 0
         depth_1d[negative_1d] = fillvalue
         depth[active] = depth_1d
 
@@ -105,9 +106,7 @@ class Calculator:
             points = data["coordinates"].transpose()
             values = data["s1"][0]
             interpolator = LinearNDInterpolator(
-                points,
-                values,
-                fill_value=NO_DATA_VALUE
+                points, values, fill_value=NO_DATA_VALUE
             )
             self.cache[self.INTERPOLATOR] = interpolator
             return interpolator
@@ -126,7 +125,7 @@ class Calculator:
 
         # note that get_nodgrid() expects a columns-first bbox
         return self.gr.cells.get_nodgrid(
-            [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER,
+            [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER
         )
 
     def _get_points(self, indices):
@@ -180,7 +179,7 @@ class ConstantLevelDepthCalculator(ConstantLevelCalculator):
         """Return waterdepth array."""
         waterlevel = super().__call__(indices, values, no_data_value)
         return self._depth_from_water_level(
-            dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
+            dem=values, fillvalue=no_data_value, waterlevel=waterlevel
         )
 
 
@@ -189,7 +188,7 @@ class InterpolatedLevelDepthCalculator(InterpolatedLevelCalculator):
         """Return waterdepth array."""
         waterlevel = super().__call__(indices, values, no_data_value)
         return self._depth_from_water_level(
-            dem=values, fillvalue=no_data_value, waterlevel=waterlevel,
+            dem=values, fillvalue=no_data_value, waterlevel=waterlevel
         )
 
 
@@ -204,6 +203,7 @@ class GeoTIFFConverter:
         The progress_func will be called multiple times with values between 0.0
         amd 1.0.
     """
+
     def __init__(self, source_path, target_path, progress_func=None):
         self.source_path = source_path
         self.target_path = target_path
@@ -217,15 +217,9 @@ class GeoTIFFConverter:
         """
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         block_x_size, block_y_size = self.block_size
-        options = [
-            "compress=deflate",
-            "blockysize=%s" % block_y_size,
-        ]
+        options = ["compress=deflate", "blockysize=%s" % block_y_size]
         if block_x_size != self.raster_x_size:
-            options += [
-                "tiled=yes",
-                "blockxsize=%s" % block_x_size,
-            ]
+            options += ["tiled=yes", "blockxsize=%s" % block_x_size]
 
         self.target = gdal.GetDriverByName("gtiff").Create(
             self.target_path,
@@ -281,6 +275,7 @@ class GeoTIFFConverter:
     def partition(self):
         """Return generator of (xoff, xsize), (yoff, ysize) values.
         """
+
         def offset_size_range(stop, step):
             for start in range(0, stop, step):
                 yield start, min(step, stop - start)
@@ -301,18 +296,14 @@ class GeoTIFFConverter:
         no_data_value = self.no_data_value
         for (xoff, xsize), (yoff, ysize) in self.partition():
             values = self.source.ReadAsArray(
-                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize,
+                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
             )
             indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
             result = calculator(
-                indices=indices,
-                values=values,
-                no_data_value=no_data_value,
+                indices=indices, values=values, no_data_value=no_data_value
             )
 
-            self.target.GetRasterBand(1).WriteArray(
-                array=result, xoff=xoff, yoff=yoff
-            )
+            self.target.GetRasterBand(1).WriteArray(array=result, xoff=xoff, yoff=yoff)
 
 
 calculator_classes = {
