@@ -260,17 +260,3 @@ def calculate_waterdepth(
         }
         with CalculatorClass(**calculator_kwargs) as calculator:
             converter.convert_using(calculator)
-
-
-### Bergermeer Data Set ###
-#''' # coarse grid
-calculate_waterdepth(
-    gridadmin_path="Bergermeer_Eva_Coarsegrid_gridadmin.h5",
-    results_3di_path="Bergermeer_Eva_Coarsegrid_results_3di.nc",
-    dem_path="dem_test_5m.tif",
-    waterdepth_path="test2.tif",  # "Bergermeer_Eva_Coarsegrid_1h_Bilin_Depth.tif",#Combi_Depth
-    calculation_step=60,  # 60,#(1h), -1
-    mode="au-squares",  # MODE_MY_INTERP_2_DEPTH, #MODE_INTERPOLATED_S1,#MODE_CONSTANT_S1,
-    progress_func=gdal.TermProgress_nocb,
-)
-#'''
