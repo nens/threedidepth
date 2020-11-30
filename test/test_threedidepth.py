@@ -22,8 +22,10 @@ from threedidepth.calculate import MODE_COPY
 from threedidepth.calculate import MODE_NODGRID
 from threedidepth.calculate import MODE_CONSTANT_S1
 from threedidepth.calculate import MODE_INTERPOLATED_S1
+from threedidepth.calculate import MODE_LIZARD_S1
 from threedidepth.calculate import MODE_CONSTANT
 from threedidepth.calculate import MODE_INTERPOLATED
+from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 from threedidepth.commands import threedidepth
 
@@ -184,12 +186,14 @@ def test_calculate_waterdepth(source_path, target_path, admin):
 
 
 data = (
-    (MODE_COPY, np.array([[NDV, 2.0], [2.0, 2.0]])),
-    (MODE_NODGRID, np.array([[6, 7], [8, 9]])),
-    (MODE_CONSTANT_S1, np.array([[2.3, 2.2], [2.1, 2.0]])),
-    (MODE_INTERPOLATED_S1, np.array([[2.3, 2.2], [2.1, 2.1]])),
-    (MODE_CONSTANT, np.array([[NDV, 0.2], [0.1, NDV]])),
-    (MODE_INTERPOLATED, np.array([[NDV, 0.2], [0.1, 0.1]])),
+    # (MODE_COPY, np.array([[NDV, 2.0], [2.0, 2.0]])),
+    # (MODE_NODGRID, np.array([[6, 7], [8, 9]])),
+    # (MODE_CONSTANT_S1, np.array([[2.3, 2.2], [2.1, 2.0]])),
+    # (MODE_INTERPOLATED_S1, np.array([[2.3, 2.2], [2.1, 2.1]])),
+    (MODE_LIZARD_S1, np.array([[2.3, 2.2], [2.1, 2.1]])),
+    # (MODE_CONSTANT, np.array([[NDV, 0.2], [0.1, NDV]])),
+    # (MODE_INTERPOLATED, np.array([[NDV, 0.2], [0.1, 0.1]])),
+    (MODE_LIZARD, np.array([[NDV, 0.2], [0.1, 0.1]])),
 )
 
 
@@ -219,11 +223,15 @@ def test_calculators(mode, expected, admin):
     # prepare gridadmin uses
     if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
         admin.cells.get_nodgrid.return_value = nodgrid[1:3, 2:4]
+    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
+        data = {"id": ids, "s1": s1}
+        admin.nodes.subset().timeseries().only().data = data
     if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
         data = {"coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
-    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
-        data = {"id": ids, "s1": s1}
+    if mode in (MODE_LIZARD_S1, MODE_LIZARD):
+        # TODO actually there will be two separate calls to the admin
+        data = {"id": ids, "coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
 
     calculator_kwargs = {
