@@ -16,10 +16,10 @@ from threedidepth.fixes import fix_gridadmin
 MODE_COPY = "copy"
 MODE_NODGRID = "nodgrid"
 MODE_CONSTANT_S1 = "constant-s1"
-MODE_INTERPOLATED_S1 = "interpolated-s1"
+MODE_LINEAR_S1 = "linear-s1"
 MODE_LIZARD_S1 = "lizard-s1"
 MODE_CONSTANT = "constant"
-MODE_INTERPOLATED = "interpolated"
+MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
 
 
@@ -88,6 +88,13 @@ class Calculator:
 
     @property
     def lookup_s1(self):
+        """
+        Return the lookup table to find waterlevel by cell id.
+
+        Both cells outside any defined grid cell and cells in a grid cell that
+        are currently not active ('no data') will return the NO_DATA_VALUE as
+        defined in threedigrid.
+        """
         try:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
@@ -95,7 +102,7 @@ class Calculator:
             timeseries = nodes.timeseries(indexes=[self.calculation_step])
             data = timeseries.only("s1", "id").data
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data["s1"]
+            lookup_s1[data["id"]] = data["s1"][0]
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
 
@@ -117,6 +124,12 @@ class Calculator:
 
     @property
     def delaunay(self):
+        """
+        Return a (delaunay, s1) tuple.
+
+        `delaunay` is a qhull.Delaunay object, and `s1` is an array of
+        waterlevels for the corresponding delaunay vertices.
+        """
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
@@ -125,8 +138,9 @@ class Calculator:
             data = timeseries.only("s1", "coordinates").data
             points = data["coordinates"].transpose()
             delaunay = qhull.Delaunay(points)
-            self.cache[self.DELAUNAY] = delaunay
-            return delaunay
+            s1 = data["s1"][0]
+            self.cache[self.DELAUNAY] = delaunay, s1
+            return delaunay, s1
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -184,7 +198,7 @@ class ConstantLevelCalculator(Calculator):
         return self.lookup_s1[self._get_nodgrid(indices)]
 
 
-class InterpolatedLevelCalculator(Calculator):
+class LinearLevelCalculator(Calculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         points = self._get_points(indices)
@@ -196,32 +210,35 @@ class LizardLevelCalculator(Calculator):
         """ Return waterlevel array.
 
         This uses both the grid layout from the constant level method and the
-        triangulation from the interpolated method.
+        triangulation from the linear method.
 
-        For points inside the triangulation and inside gridcells, use
-        barycentric coordinates as weights for the waterlevel values at the
-        nodes. If the sum of weights pointing to active nodes is less than half
-        of more than half of the total weight points to a 'no data' value,
-        return 'no data'.
+        Interpolation is used to determine the waterlevel for a result cell if
+        all of the following requirements are met:
+        - The point is inside a grid cell
+        - The point is inside the triangulation
+        - The sum of weights of active (not 'no data' nodes) is more than half
+          of the total weight of all nodes.
 
-        Outside the triangulation, but inside gridcells, use the constant level
-        method.  """
+        In all other cases, the waterlevel from the constant level method is
+        used."""
         # start with the constant level result
-        nodgrid = self._get_nodgrid(indices)
-        level = self.lookup_s1[self._get_nodgrid(indices)]
+        nodgrid = self._get_nodgrid(indices).ravel()
+        level = self.lookup_s1[nodgrid]
 
-        # determine points for the interpolation
+        # determine result raster cell centers and in which triangle they are
         points = self._get_points(indices)
-        simplices = self.delaunay.find_simplex(points)
+        delaunay, s1 = self.delaunay
+        simplices = delaunay.find_simplex(points)
 
-        # determine the points that use interpolation
-        in_gridcell = nodgrid.ravel() != NO_DATA_VALUE
+        # determine which points will use interpolation
+        in_gridcell = nodgrid != 0
         in_triangle = simplices != -1
         in_interpol = in_gridcell & in_triangle
+        points = points[in_interpol]
 
-        # analy
-        transform = self.delaunay.transform[simplices[in_interpol]]
-        vertices = self.delaunay.vertices[simplices[in_interpol]]
+        # get the nodes and the transform for the corresponding triangles
+        transform = delaunay.transform[simplices[in_interpol]]
+        vertices = delaunay.vertices[simplices[in_interpol]]
 
         # calculate weight, see print(spatial.Delaunay.transform.__doc__) and
         # Wikipedia about barycentric coordinates
@@ -231,18 +248,23 @@ class LizardLevelCalculator(Calculator):
         )
         weight[:, 2] = 1 - weight[:, 0] - weight[:, 1]
 
-        # set weight to zero when value equals fillvalue
-        nodelevel = self.lookup_s1[vertices]
+        # set weight to zero when for inactive nodes
+        nodelevel = s1[vertices]
         weight[nodelevel == NO_DATA_VALUE] = 0
 
-        # normalize remaining weight
-        weight_sum = weight.sum(0)
-        index = weight_sum > 0.5
-        weight /= np.where(index, weight_sum, 1)
+        # determine the sum of weights per result cell
+        weight_sum = weight.sum(axis=1)
+
+        # further subselect points suitable for interpolation
+        suitable = weight_sum > 0.5
+        weight = weight[suitable] / weight_sum[suitable][:, np.newaxis]
+        nodelevel = nodelevel[suitable]
 
         # combine weight and nodelevel into result
-        level[index] = np.sum(weight[:, index] * nodelevel[:, index], axis=0)
-        return level
+        in_interpol_and_suitable = in_interpol.copy()
+        in_interpol_and_suitable[in_interpol] &= suitable
+        level[in_interpol_and_suitable] = np.sum(weight * nodelevel, axis=1)
+        return level.reshape(values.shape)
 
 
 class ConstantLevelDepthCalculator(ConstantLevelCalculator):
@@ -254,7 +276,7 @@ class ConstantLevelDepthCalculator(ConstantLevelCalculator):
         )
 
 
-class InterpolatedLevelDepthCalculator(InterpolatedLevelCalculator):
+class LinearLevelDepthCalculator(LinearLevelCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterdepth array."""
         waterlevel = super().__call__(indices, values, no_data_value)
@@ -392,10 +414,10 @@ calculator_classes = {
     MODE_COPY: CopyCalculator,
     MODE_NODGRID: NodGridCalculator,
     MODE_CONSTANT_S1: ConstantLevelCalculator,
-    MODE_INTERPOLATED_S1: InterpolatedLevelCalculator,
+    MODE_LINEAR_S1: LinearLevelCalculator,
     MODE_LIZARD_S1: LizardLevelCalculator,
     MODE_CONSTANT: ConstantLevelDepthCalculator,
-    MODE_INTERPOLATED: InterpolatedLevelDepthCalculator,
+    MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
 }
 
@@ -406,7 +428,7 @@ def calculate_waterdepth(
     dem_path,
     waterdepth_path,
     calculation_step=-1,
-    mode=MODE_INTERPOLATED,
+    mode=MODE_LINEAR,
     progress_func=None,
 ):
     """Calculate waterdepth and save it as GeoTIFF.

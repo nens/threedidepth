@@ -5,7 +5,7 @@ import argparse
 from osgeo import gdal
 
 from threedidepth.calculate import calculate_waterdepth
-from threedidepth.calculate import MODE_INTERPOLATED
+from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import MODE_CONSTANT
 
 
@@ -19,9 +19,13 @@ def threedidepth(*args):
         metavar="results_3di",
         help="path to simulation results file",
     )
-    parser.add_argument("dem_path", metavar="dem", help="path to bathymetry file")
     parser.add_argument(
-        "waterdepth_path", metavar="waterdepth", help="path to resulting geotiff"
+        "dem_path", metavar="dem", help="path to bathymetry file"
+    )
+    parser.add_argument(
+        "waterdepth_path",
+        metavar="waterdepth",
+        help="path to resulting geotiff"
     )
     parser.add_argument(
         "-s",
@@ -49,5 +53,5 @@ def threedidepth(*args):
     if kwargs.pop("constant"):
         kwargs["mode"] = MODE_CONSTANT
     else:
-        kwargs["mode"] = MODE_INTERPOLATED
+        kwargs["mode"] = MODE_LIZARD
     calculate_waterdepth(**kwargs)

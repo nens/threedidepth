@@ -28,4 +28,6 @@ def fix_gridadmin(gridadmin_path):
             pixel_coords[2, mask] = ip[3, nodm[mask] - 1, nodk[mask] - 1]
             pixel_coords[3, mask] = jp[3, nodn[mask] - 1, nodk[mask] - 1]
         node_group = h5py_file["nodes"]
-        node_group.create_dataset("pixel_coords", data=pixel_coords, dtype="int")
+        node_group.create_dataset(
+            "pixel_coords", data=pixel_coords, dtype="int"
+        )
