@@ -428,7 +428,7 @@ def calculate_waterdepth(
     dem_path,
     waterdepth_path,
     calculation_step=-1,
-    mode=MODE_LINEAR,
+    mode=MODE_LIZARD,
     progress_func=None,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
