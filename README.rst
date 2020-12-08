@@ -8,6 +8,9 @@ Calculate waterdepths for 3Di results.
 * Progress indicator support
 * Low memory consumption
 
+For the interpolated mode, the 'lizard'-method is used. For a detailed
+description, read the docstring for the `LizardLevelCalculator`.
+
 
 Installation
 ------------

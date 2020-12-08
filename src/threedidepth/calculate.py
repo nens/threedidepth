@@ -217,7 +217,8 @@ class LizardLevelCalculator(Calculator):
         - The point is inside a grid cell
         - The point is inside the triangulation
         - The sum of weights of active (not 'no data' nodes) is more than half
-          of the total weight of all nodes.
+          of the total weight of all nodes. Only active nodes are included in
+          the interpolation.
 
         In all other cases, the waterlevel from the constant level method is
         used."""
