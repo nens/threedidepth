@@ -2,8 +2,8 @@ Changelog of threedidepth
 =========================
 
 
-0.1.3 (unreleased)
-------------------
+0.2 (2020-12-10)
+----------------
 
 - Implemented lizard method and set it as default.
 
