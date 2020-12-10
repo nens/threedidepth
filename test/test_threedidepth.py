@@ -6,7 +6,7 @@ import random
 import string
 import sys
 
-from numpy.testing import assert_almost_equal
+from numpy.testing import assert_allclose
 from osgeo import gdal
 from osgeo import osr
 from pytest import fixture
@@ -21,14 +21,17 @@ from threedidepth.calculate import calculator_classes
 from threedidepth.calculate import MODE_COPY
 from threedidepth.calculate import MODE_NODGRID
 from threedidepth.calculate import MODE_CONSTANT_S1
-from threedidepth.calculate import MODE_INTERPOLATED_S1
+from threedidepth.calculate import MODE_LINEAR_S1
+from threedidepth.calculate import MODE_LIZARD_S1
 from threedidepth.calculate import MODE_CONSTANT
-from threedidepth.calculate import MODE_INTERPOLATED
+from threedidepth.calculate import MODE_LINEAR
+from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 from threedidepth.commands import threedidepth
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 NDV = -9  # no data value of the test dem
+NLV = -9999.  # "no level value"
 
 
 def random_slug(size):
@@ -157,7 +160,7 @@ def test_command(tmpdir):
             dem_path="c",
             waterdepth_path="d",
             calculation_step=-1,
-            mode=MODE_INTERPOLATED,
+            mode=MODE_LINEAR,
         )
         args.append("--constant")
         with mock.patch.object(sys, "argv", args):
@@ -183,54 +186,104 @@ def test_calculate_waterdepth(source_path, target_path, admin):
         )
 
 
+def test_depth_from_water_level():
+    dem = np.array([[7.0, 2.0], [3.0, 4.0]])
+    fillvalue = 7.0
+    waterlevel = np.array([[4.0, NDV], [4.0, 4.0]])
+    depth = Calculator._depth_from_water_level(
+        dem=dem, fillvalue=fillvalue, waterlevel=waterlevel,
+    )
+    assert depth[0, 0] == fillvalue  # because dem is fillvalue
+    assert depth[0, 1] == fillvalue  # because waterlevel is no data
+    assert depth[1, 0] == 1.0        # really, a depth
+    assert depth[1, 1] == fillvalue  # because depth <= 0
+
+
+# some interpolated values as expected results for the linear mode
+EL1 = 4.0 / 4 + NLV * 3 / 4
+EL2 = 6.0 / 3 + NLV * 2 / 3
+EL3 = 5.0 / 2 + NLV / 4 + 4.0 / 4
+EL4 = 6.0 / 3 + NLV / 6 + 5.0 / 2
 data = (
-    (MODE_COPY, np.array([[NDV, 2.0], [2.0, 2.0]])),
-    (MODE_NODGRID, np.array([[6, 7], [8, 9]])),
-    (MODE_CONSTANT_S1, np.array([[2.3, 2.2], [2.1, 2.0]])),
-    (MODE_INTERPOLATED_S1, np.array([[2.3, 2.2], [2.1, 2.1]])),
-    (MODE_CONSTANT, np.array([[NDV, 0.2], [0.1, NDV]])),
-    (MODE_INTERPOLATED, np.array([[NDV, 0.2], [0.1, 0.1]])),
+    (
+        MODE_COPY,
+        np.array([[6.0, 6.0, 6.0, 6.0],
+                  [6.0, 6.0, 6.0, 6.0],
+                  [6.0, 6.0, 6.0, NDV]]),
+    ),
+    (
+        MODE_NODGRID,
+        np.array([[2, 2, 3, 3],
+                  [0, 5, 6, 7],
+                  [5, 5, 8, 9]]),
+    ),
+    (
+        MODE_CONSTANT_S1,
+        np.array([[NLV, NLV, NLV, NLV],
+                  [NLV, 5.0, 6.0, 7.0],
+                  [5.0, 5.0, 8.0, 9.0]]),
+    ),
+    (
+        MODE_LINEAR_S1,
+        np.array([[EL1, EL2, EL2, NLV],
+                  [EL3, EL4, 6.0, 7.0],
+                  [NLV, NLV, 8.0, 9.0]]),
+    ),
+    (
+        MODE_LIZARD_S1,
+        np.array([[NLV, NLV, NLV, NLV],
+                  [NLV, 5.4, 6.0, 7.0],
+                  [5.0, 5.0, 8.0, 9.0]]),
+    ),
 )
 
 
 @mark.parametrize("mode, expected", data)
 def test_calculators(mode, expected, admin):
-    # indices and geo_transform make the values lie in a (6, 4), (10, 8) bbox
-    indices = ((1, 2), (3, 4))
-    geo_transform = (2, 2, 0, 10, 0, -2)
     nodgrid = np.array([
-        [1, 2, 3, 4],
-        [5, 5, 6, 7],
-        [5, 5, 8, 9],
-    ])
-    s1 = np.array([[1.0, 1.0, 1.0, 1.0, 1.0, 2.3, 2.2, 2.1, 2.0]])
+        [1, 1, 2, 2, 3, 3],
+        [1, 1, 2, 2, 3, 3],
+        [4, 4, 0, 5, 6, 7],
+        [4, 4, 5, 5, 8, 9],
+    ])  # note that 0 means no grid cell at all in threedigrid
+    geo_transform = (20, 2, 0, 48, 0, -2)  # bbox: (20, 40, 32, 48)
+    s1 = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]])
+    s1[:, :3] = -9999.0
     ids = np.arange(1, 10)
     coordinates = np.array([
-        [3, 5, 7, 9, 4, 7, 9, 7, 9],
-        [9, 9, 9, 9, 6, 7, 7, 5, 3],  # last node pulled down one cell
+        [22, 26, 30, 22, 26, 29, 31, 29, 31],
+        [46, 46, 46, 42, 42, 43, 43, 41, 41],
     ])
+
+    # request indices and selection of nodgrid
+    indices = ((1, 2), (4, 6))  # request bbox (24, 42), (32, 48)
 
     # dem values
     values = np.array([
-        [NDV, 2.0],
-        [2.0, 2.0],
+        [6.0, 6.0, 6.0, 6.0],
+        [6.0, 6.0, 6.0, 6.0],
+        [6.0, 6.0, 6.0, NDV],
     ])
 
     # prepare gridadmin uses
-    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        admin.cells.get_nodgrid.return_value = nodgrid[1:3, 2:4]
-    if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
-        data = {"coordinates": coordinates, "s1": s1}
-        admin.nodes.subset().timeseries().only().data = data
-    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
+    admin.cells.get_nodgrid.return_value = nodgrid[tuple(map(slice, *indices))]
+    if mode in (MODE_CONSTANT_S1):
         data = {"id": ids, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
+    if mode in (MODE_LINEAR_S1):
+        data = {"coordinates": coordinates, "s1": s1}
+        admin.nodes.subset().timeseries().only().data = data
+    if mode in (MODE_LIZARD_S1):
+        admin.nodes.subset().timeseries().only.side_effect = [
+            mock.Mock(data={"id": ids, "s1": s1}),
+            mock.Mock(data={"coordinates": coordinates, "s1": s1}),
+        ]
 
     calculator_kwargs = {
         "gridadmin_path": "dummy",
         "results_3di_path": "dummy",
         "calculation_step": -1,
-        "dem_shape": (3, 4),
+        "dem_shape": nodgrid.shape,
         "dem_geo_transform": geo_transform,
     }
 
@@ -243,27 +296,63 @@ def test_calculators(mode, expected, admin):
     CalculatorClass = calculator_classes[mode]
     with CalculatorClass(**calculator_kwargs) as calculator:
         result = calculator(**call_kwargs)
-    assert_almost_equal(result, expected)
+    assert_allclose(result, expected)
 
     # check gridadmin uses
-    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_CONSTANT):
-        # get_nodgrid() wants (1, 2), (3, 4) flipped & transposed
+    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_LIZARD_S1):
+        # get_nodgrid() wants (1, 2), (4, 6) flipped & transposed
         admin.cells.get_nodgrid.assert_called_once_with(
-            [2, 0, 4, 2],
+            [2, 0, 6, 3],
             subset_name=SUBSET_2D_OPEN_WATER,
         )
-    if mode in (MODE_INTERPOLATED_S1, MODE_INTERPOLATED):
+    if mode in (MODE_LINEAR_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "coordinates",
         )
-    if mode in (MODE_CONSTANT_S1, MODE_CONSTANT):
+    if mode in (MODE_CONSTANT_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
+    if mode in (MODE_LIZARD_S1):
+        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries().only.assert_has_calls(
+            [mock.call("s1", "id"), mock.call("s1", "coordinates")]
+        )
+
+
+@fixture
+def depthmock():
+    import_path = "threedidepth.calculate.Calculator._depth_from_water_level"
+    with mock.patch(import_path) as depthmock:
+        yield depthmock
+
+
+mode = (
+    MODE_CONSTANT,
+    MODE_LINEAR,
+    MODE_LIZARD,
+)
+
+
+@mark.parametrize("mode", mode)
+def test_depth_calculators(depthmock, mode):
+    CalculatorClass = calculator_classes[mode]
+    BaseClass = CalculatorClass.__bases__[0]
+    depthmock.return_value = 5
+    import_path = "threedidepth.calculate." + BaseClass.__name__ + ".__call__"
+    with mock.patch(import_path) as callmock:
+        callmock.return_value = 4
+        calculator = CalculatorClass("", "", "", "", "")
+        depth = calculator(1, 2, 3)
+
+    callmock.assert_called_once_with(1, 2, 3)
+    depthmock.assert_called_once_with(dem=2, fillvalue=3, waterlevel=4)
+    assert depth == 5
 
 
 def test_calculator_not_implemented():
