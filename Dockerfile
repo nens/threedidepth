@@ -37,3 +37,4 @@ RUN groupadd -g $gid nens && useradd -lm -u $uid -g $gid nens
 VOLUME /code
 WORKDIR /code
 USER nens
+ENV PATH=/code/.venv/bin:$PATH

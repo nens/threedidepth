@@ -24,13 +24,13 @@ jobs:
         run: docker-compose run --rm lib virtualenv .venv --system-site-packages
 
       - name: Install requirements
-        run: docker-compose run --rm lib .venv/bin/pip install -r requirements.txt
+        run: docker-compose run --rm lib pip install -r requirements.txt
 
       - name: Install our package
-        run: docker-compose run --rm lib .venv/bin/pip install -e .[test]
+        run: docker-compose run --rm lib pip install -e .[test]
 
       - name: Run tests
-        run: docker-compose run --rm lib .venv/bin/pytest
+        run: docker-compose run --rm lib pytest
 
       - name: Flake8
-        run: if docker-compose run --rm lib .venv/bin/flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi
+        run: if docker-compose run --rm lib flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi

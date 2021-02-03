@@ -43,14 +43,20 @@ For development, clone the repository and use a docker-compose setup::
     $ docker-compose start
     $ docker-compose exec lib bash
 
-(Re)create & activate a virtualenv::
+Create a virtualenv::
 
-    (docker)$ rm -rf .venv
+    # note that Dockerfile prepends .venv/bin to $PATH
     (docker)$ virtualenv .venv --system-site-packages
-    (docker)$ source .venv/bin/activate
 
 Install dependencies & package and run tests::
 
-    (docker)(virtualenv)$ pip install -r requirements.txt
-    (docker)(virtualenv)$ pip install -e .[test]
-    (docker)(virtualenv)$ pytest
+    (docker)$ pip install -r requirements.txt
+    (docker)$ pip install -e .[test]
+    (docker)$ pytest
+
+Update packages::
+    
+    (docker)$ rm -rf .venv
+    (docker)$ virtualenv .threedidepth
+    (docker)$ pip install -e .
+    (docker)$ pip freeze | grep -v threedidepth > requirements.txt
