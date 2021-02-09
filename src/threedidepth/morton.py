@@ -94,3 +94,45 @@ def get_morton_lut(array, no_data_value):
 
     # return the combined lookup table
     return lut2[lut1]
+
+
+def analyze(dimension):
+    """ Return first, last and (smallest) step. """
+    unique = np.unique(dimension)
+    first = unique[0]
+    last = unique[-1]
+    step = None if first == last else np.diff(unique).min()
+    return first, last, step
+
+
+def rasterize(points):
+    """ Rasterize the points into an array in a very simle way. """
+    x, y = points.transpose()
+    (x1, x2, xs), (y1, y2, ys) = [analyze(d) for d in (x, y)]
+
+    # get indices to land each point index in its own array cell
+    j = np.int64(np.zeros_like(x) if xs is None else (x - x1) / xs + 0.5)
+    i = np.int64(np.zeros_like(y) if ys is None else (y2 - y) / ys + 0.5)
+
+    index = i, j
+    no_data_value = len(points)
+    ids = np.arange(no_data_value)
+
+    values = np.full((i.max() + 1, j.max() + 1), no_data_value)
+    values[index] = ids
+
+    return values, no_data_value
+
+
+def reorder(points, s1):
+    """
+    Return (points, s1) reordered to morton order.
+    """
+    array, no_data_value = rasterize(points)
+
+    # derive the inverse lut
+    lut = get_morton_lut(array=array, no_data_value=no_data_value)
+    inv = np.arange(no_data_value)
+    inv[lut[inv]] = inv.copy()  # may get bogus results without the copy
+
+    return points[inv], s1[inv]

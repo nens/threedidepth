@@ -12,6 +12,7 @@ from threedigrid.admin.gridresultadmin import GridH5ResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
+from threedidepth import morton
 
 MODE_COPY = "copy"
 MODE_NODGRID = "nodgrid"
@@ -137,8 +138,12 @@ class Calculator:
             timeseries = nodes.timeseries(indexes=[self.calculation_step])
             data = timeseries.only("s1", "coordinates").data
             points = data["coordinates"].transpose()
-            delaunay = qhull.Delaunay(points)
             s1 = data["s1"][0]
+
+            # reorder a la lizard
+            points, s1 = morton.reorder(points, s1)
+
+            delaunay = qhull.Delaunay(points)
             self.cache[self.DELAUNAY] = delaunay, s1
             return delaunay, s1
 

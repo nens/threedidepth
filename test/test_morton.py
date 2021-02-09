@@ -2,6 +2,8 @@
 
 import pytest
 
+import numpy as np
+
 from threedidepth import morton
 
 
@@ -20,3 +22,32 @@ def test_morton_array():
     assert morton.morton_array((1, 2)).tolist() == [[0, 1]]
     with pytest.raises(ValueError):
         morton.morton_array((2 ** 32, 2 ** 32))
+
+
+def test_rasterize():
+    # single point
+    points = np.array([[0, 0]])
+    expected = [[0]]
+    result = morton.rasterize(points)[0].tolist()
+    assert result == expected
+
+    # horizontal
+    points = np.array([[0, 0], [1, 0]])
+    expected = [[0, 1]]
+    result = morton.rasterize(points)[0].tolist()
+    assert result == expected
+
+    # vertical
+    points = np.array([[0, 0], [1, 0]])
+    expected = [[0, 1]]
+    result = morton.rasterize(points)[0].tolist()
+    assert result == expected
+
+    # quadtree - here is a problem
+    points = np.array([[1, 1], [3, 1], [1, 3], [3, 3], [6, 2]])
+    expected = [
+        [2, 3, 4, 5],
+        [0, 1, 5, 5],
+    ]
+    result = morton.rasterize(points)[0].tolist()
+    # assert result == expected
