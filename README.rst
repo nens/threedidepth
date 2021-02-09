@@ -57,6 +57,6 @@ Install dependencies & package and run tests::
 Update packages::
     
     (docker)$ rm -rf .venv
-    (docker)$ virtualenv .threedidepth
+    (docker)$ virtualenv .venv --system-site-packages
     (docker)$ pip install -e .
     (docker)$ pip freeze | grep -v threedidepth > requirements.txt
