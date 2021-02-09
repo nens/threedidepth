@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from unittest import mock
 import random
 import string
-import sys
 
 from numpy.testing import assert_allclose
 from osgeo import gdal
@@ -27,7 +26,6 @@ from threedidepth.calculate import MODE_CONSTANT
 from threedidepth.calculate import MODE_LINEAR
 from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
-from threedidepth.commands import threedidepth
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 NDV = -9  # no data value of the test dem
