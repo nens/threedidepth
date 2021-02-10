@@ -24,6 +24,13 @@ def test_morton_array():
         morton.morton_array((2 ** 32, 2 ** 32))
 
 
+def test_group():
+    array = np.array([0.6, 0.6, 0.6, 0.5, 0.7, 0.5, 0.7, 0.5, 0.7])
+    expected = [[3, 5, 7], [0, 1, 2], [4, 6, 8]]
+    result = [i.tolist() for i in morton.group(array)]
+    assert result == expected
+
+
 def test_rasterize():
     # single point
     points = np.array([[0, 0]])
@@ -43,11 +50,24 @@ def test_rasterize():
     result = morton.rasterize(points)[0].tolist()
     assert result == expected
 
-    # quadtree - here is a problem
+    # quadtree
     points = np.array([[1, 1], [3, 1], [1, 3], [3, 3], [6, 2]])
     expected = [
-        [2, 3, 4, 5],
-        [0, 1, 5, 5],
+        [2, 3, 4],
+        [0, 1, 5],
     ]
     result = morton.rasterize(points)[0].tolist()
-    # assert result == expected
+    assert result == expected
+
+
+def test_reorder():
+    points = np.array([[1, 3], [3, 1], [6, 2], [3, 3], [1, 1]])
+    s1 = np.array([1, 2, 3, 4, 5])
+
+    result_points, result_s1 = morton.reorder(points, s1)
+
+    expected_points = [[1, 3], [3, 3], [1, 1], [3, 1], [6, 2]]
+    expected_s1 = [1, 4, 5, 2, 3]
+
+    assert result_points.tolist() == expected_points
+    assert result_s1.tolist() == expected_s1

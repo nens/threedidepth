@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from functools import reduce
+from itertools import zip_longest
 from math import ceil
 from math import floor
 from math import log
@@ -96,23 +97,43 @@ def get_morton_lut(array, no_data_value):
     return lut2[lut1]
 
 
-def analyze(dimension):
-    """ Return first, last and (smallest) step. """
-    unique = np.unique(dimension)
-    first = unique[0]
-    last = unique[-1]
-    step = None if first == last else np.diff(unique).min()
-    return first, last, step
+def group(array):
+    """
+    Return generator of arrays of indices to requal values.
+    """
+    order = array.argsort()
+    _, index = np.unique(array[order], return_index=True)
+    for start, stop in zip_longest(index, index[1:]):
+        yield order[start:stop]
+
+
+def analyze(points):
+    """ Return (start, stop, step) tuples for both dimensions. """
+    assert points.dtype == float
+
+    x, y = points.transpose()
+    x1, y1, x2, y2 = x.min(), y.min(), x.max(), y.max()
+
+    init = {'initial': np.inf}
+
+    xs = min(np.diff(np.sort(x[i])).min(**init) for i in group(y))
+    ys = min(np.diff(np.sort(y[i])).min(**init) for i in group(x))
+
+    return (
+        (x1, x2, None if np.isinf(xs) else xs),
+        (y1, y2, None if np.isinf(ys) else ys),
+    )
 
 
 def rasterize(points):
     """ Rasterize the points into an array in a very simle way. """
+    points = np.asarray(points, dtype=float)
+    (x1, x2, xs), (y1, y2, ys) = analyze(points)
     x, y = points.transpose()
-    (x1, x2, xs), (y1, y2, ys) = [analyze(d) for d in (x, y)]
 
     # get indices to land each point index in its own array cell
-    j = np.int64(np.zeros_like(x) if xs is None else (x - x1) / xs + 0.5)
-    i = np.int64(np.zeros_like(y) if ys is None else (y2 - y) / ys + 0.5)
+    j = np.int64(np.zeros_like(x) if xs is None else (x - x1) / xs)
+    i = np.int64(np.zeros_like(y) if ys is None else (y2 - y) / ys)
 
     index = i, j
     no_data_value = len(points)
