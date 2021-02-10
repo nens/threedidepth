@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.3 (unreleased)
 ----------------
 
-- Nothing changed yet.
+- Reorder to match the lizard triangulation.
 
 
 0.2 (2020-12-10)

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from functools import reduce
+from itertools import zip_longest
 from math import ceil
 from math import floor
 from math import log
@@ -94,3 +95,78 @@ def get_morton_lut(array, no_data_value):
 
     # return the combined lookup table
     return lut2[lut1]
+
+
+def group(array):
+    """
+    Return generator of arrays of indices to equal values.
+    """
+    order = array.argsort()
+    _, index = np.unique(array[order], return_index=True)
+    for start, stop in zip_longest(index, index[1:]):
+        yield order[start:stop]
+
+
+def analyze(x, y):
+    """ Return (x_step, y_step) tuple.
+
+    Return the smallest separation between points in the x-direction for points
+    with the same y-coordinates and vice versa. That reveals the highest
+    refinement level of the quadtree structure.
+    """
+    assert x.dtype == float
+    assert y.dtype == float
+
+    init = {'initial': np.inf}
+
+    xs = min(np.diff(np.sort(x[i])).min(**init) for i in group(y))
+    ys = min(np.diff(np.sort(y[i])).min(**init) for i in group(x))
+
+    return None if np.isinf(xs) else xs, None if np.isinf(ys) else ys
+
+
+def rasterize(points):
+    """ Return (array, no_data_value) tuple.
+
+    Rasterize the indices of the points in an array at the highest quadtree
+    resolution. Note that points of larger squares in the quadtree also just
+    occupy one cell in the resulting array, the rest of the cells get the
+    no_data_value.
+    """
+    points = np.asarray(points, dtype=float)
+    x, y = points.transpose()
+    xs, ys = analyze(x, y)
+    x1, y2 = x.min(), y.max()
+
+    # get indices to land each point index in its own array cell
+    j = np.int64(np.zeros_like(x) if xs is None else (x - x1) / xs)
+    i = np.int64(np.zeros_like(y) if ys is None else (y2 - y) / ys)
+
+    index = i, j
+    no_data_value = len(points)
+    ids = np.arange(no_data_value)
+
+    values = np.full((i.max() + 1, j.max() + 1), no_data_value)
+    values[index] = ids
+
+    return values, no_data_value
+
+
+def reorder(points, s1):
+    """
+    Return (points, s1) reordered to morton order.
+    """
+    array, no_data_value = rasterize(points)
+
+    # array[lut] would have the ids in array in morton order
+    lut = get_morton_lut(array=array, no_data_value=no_data_value)
+
+    # the points need to be reordered such that rasterize(points[inv]) becomes
+    # equal to lut[rasterize(points)] - in other words, for 'index value' a in
+    # the raster to become 'index value' b in the raster, the index b in the
+    # reordered points array must be occupied by the point from index a in the
+    # old points array
+    inv = np.arange(no_data_value)
+    inv[lut[inv]] = inv.copy()  # may get bogus results without the copy
+
+    return points[inv], s1[inv]
