@@ -99,7 +99,7 @@ def get_morton_lut(array, no_data_value):
 
 def group(array):
     """
-    Return generator of arrays of indices to requal values.
+    Return generator of arrays of indices to equal values.
     """
     order = array.argsort()
     _, index = np.unique(array[order], return_index=True)
@@ -107,29 +107,36 @@ def group(array):
         yield order[start:stop]
 
 
-def analyze(points):
-    """ Return (start, stop, step) tuples for both dimensions. """
-    assert points.dtype == float
+def analyze(x, y):
+    """ Return (x_step, y_step) tuple.
 
-    x, y = points.transpose()
-    x1, y1, x2, y2 = x.min(), y.min(), x.max(), y.max()
+    Return the smallest separation between points in the x-direction for points
+    with the same y-coordinates and vice versa. That reveals the highest
+    refinement level of the quadtree structure.
+    """
+    assert x.dtype == float
+    assert y.dtype == float
 
     init = {'initial': np.inf}
 
     xs = min(np.diff(np.sort(x[i])).min(**init) for i in group(y))
     ys = min(np.diff(np.sort(y[i])).min(**init) for i in group(x))
 
-    return (
-        (x1, x2, None if np.isinf(xs) else xs),
-        (y1, y2, None if np.isinf(ys) else ys),
-    )
+    return None if np.isinf(xs) else xs, None if np.isinf(ys) else ys
 
 
 def rasterize(points):
-    """ Rasterize the points into an array in a very simle way. """
+    """ Return (array, no_data_value) tuple.
+
+    Rasterize the indices of the points in an array at the highest quadtree
+    resolution. Note that points of larger squares in the quadtree also just
+    occupy one cell in the resulting array, the rest of the cells get the
+    no_data_value.
+    """
     points = np.asarray(points, dtype=float)
-    (x1, x2, xs), (y1, y2, ys) = analyze(points)
     x, y = points.transpose()
+    xs, ys = analyze(x, y)
+    x1, y2 = x.min(), y.max()
 
     # get indices to land each point index in its own array cell
     j = np.int64(np.zeros_like(x) if xs is None else (x - x1) / xs)
@@ -151,8 +158,14 @@ def reorder(points, s1):
     """
     array, no_data_value = rasterize(points)
 
-    # derive the inverse lut
+    # array[lut] would have the ids in array in morton order
     lut = get_morton_lut(array=array, no_data_value=no_data_value)
+
+    # the points need to be reordered such that rasterize(points[inv]) becomes
+    # equal to lut[rasterize(points)] - in other words, for 'index value' a in
+    # the raster to become 'index value' b in the raster, the index b in the
+    # reordered points array must be occupied by the point from index a in the
+    # old points array
     inv = np.arange(no_data_value)
     inv[lut[inv]] = inv.copy()  # may get bogus results without the copy
 
