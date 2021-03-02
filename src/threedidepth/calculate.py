@@ -316,15 +316,17 @@ class GeoTIFFConverter:
         source_path (str): Path to source GeoTIFF file.
         target_path (str): Path to target GeoTIFF file.
         progress_func: a callable.
+        calculation_steps (list(int)): indexes of calculation steps for the waterdepth
 
         The progress_func will be called multiple times with values between 0.0
         amd 1.0.
     """
 
-    def __init__(self, source_path, target_path, progress_func=None):
+    def __init__(self, source_path, target_path, progress_func=None, calculation_steps=None):
         self.source_path = source_path
         self.target_path = target_path
         self.progress_func = progress_func
+        self.calculation_steps = calculation_steps
 
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
@@ -338,11 +340,16 @@ class GeoTIFFConverter:
         if block_x_size != self.raster_x_size:
             options += ["tiled=yes", "blockxsize=%s" % block_x_size]
 
+        if self.calculation_steps is None:
+            band_count = 1
+        else:
+            band_count = len(self.calculation_steps)
+
         self.target = gdal.GetDriverByName("gtiff").Create(
             self.target_path,
             self.raster_x_size,
             self.raster_y_size,
-            1,  # band count
+            band_count,  # band count
             self.source.GetRasterBand(1).DataType,
             options=options,
         )
@@ -387,7 +394,7 @@ class GeoTIFFConverter:
         block_size = self.block_size
         blocks_x = -(-self.raster_x_size // block_size[0])
         blocks_y = -(-self.raster_y_size // block_size[1])
-        return blocks_x * blocks_y
+        return blocks_x * blocks_y * len(self.calculation_steps)
 
     def partition(self):
         """Return generator of (xoff, xsize), (yoff, ysize) values.
@@ -410,19 +417,26 @@ class GeoTIFFConverter:
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
-        no_data_value = self.no_data_value
-        for (xoff, xsize), (yoff, ysize) in self.partition():
-            values = self.source.ReadAsArray(
-                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
-            )
-            indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
-            result = calculator(
-                indices=indices, values=values, no_data_value=no_data_value
-            )
+        if self.calculation_steps is None:
+            calculation_steps = [calculator.calculation_step]
+        else:
+            calculation_steps = self.calculation_steps
 
-            self.target.GetRasterBand(1).WriteArray(
-                array=result, xoff=xoff, yoff=yoff,
-            )
+        for i, calc_step in enumerate(calculation_steps, start=1):
+            calculator.calculation_step = calc_step
+            no_data_value = self.no_data_value
+            for (xoff, xsize), (yoff, ysize) in self.partition():
+                values = self.source.ReadAsArray(
+                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+                )
+                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+                result = calculator(
+                    indices=indices, values=values, no_data_value=no_data_value
+                )
+
+                self.target.GetRasterBand(i).WriteArray(
+                    array=result, xoff=xoff, yoff=yoff,
+                )
 
 
 calculator_classes = {
