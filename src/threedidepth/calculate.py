@@ -71,6 +71,15 @@ class Calculator:
         """
         raise NotImplementedError
 
+    @property
+    def calculation_step(self):
+        return self._calculation_step
+
+    @calculation_step.setter
+    def calculation_step(self, value):
+        self.cache = {}
+        self._calculation_step = value
+
     @staticmethod
     def _depth_from_water_level(dem, fillvalue, waterlevel):
         # determine depth
