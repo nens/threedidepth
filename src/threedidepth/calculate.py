@@ -3,6 +3,10 @@
 from itertools import product
 from os import path
 
+try:
+    import netCDF4
+except ImportError:
+    netCDF4 = None
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import qhull
@@ -437,6 +441,111 @@ class GeoTIFFConverter:
                 self.target.GetRasterBand(i).WriteArray(
                     array=result, xoff=xoff, yoff=yoff,
                 )
+
+
+class NetcdfConverter(GeoTIFFConverter):
+    """Convert NetCDF4 according to the CF-1.6 standards."""
+
+    def __init__(self, *args, **kwargs):
+        if netCDF4 is None:
+            raise ImportError("Could not import netCDF4")
+        super.__init__(*args, **kwargs)
+
+    def __enter__(self):
+        """Open datasets"""
+        self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
+        block_x_size, block_y_size = self.block_size
+        options = ["compress=deflate", "blocksize=%s" % block_y_size, "format=NC4"]
+        if block_x_size != self.raster_x_size:
+            options += ["tiled=yes", "blockxsize=%s" % block_x_size]
+
+        self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close datasets"""
+        self.source = None
+        self.target.close()
+
+    def _set_meta_info(self, calculator):
+        """Set meta info in the root group"""
+        gr = calculator.gr
+        self.target.Conventions = "CF-1.6"
+        self.target.institution = "3Di Waterbeheer"
+        self.target.model_slug = gr.model_slug
+        self.target.result_type = "Derived water depth"
+        self.target.references = "http://3di.nu"
+
+    def _set_time(self, calculator, calculation_steps):
+        """Set time"""
+        gr = calculator.gr
+
+        self.target.createDimension("time", len(calculation_steps))
+        time = self.target.createVariable("time", "f4", ("time",))
+        time[:] = gr.nodes.timestamps[calculation_steps]
+        time.standard_name = "time"
+        time.units = gr.time_units.decode("utf-8")
+        time.calendar = "standard"
+        time.axis = "T"
+
+    def _set_lat_lon(self):
+        geotransform = self.source.GetGeoTransform()
+
+        self.target.createDimension("lat", self.raster_y_size)
+        latitudes = self.target.createVariable("lat", "f4", ("lat",))
+        latitudes[:] = np.arange(
+            geotransform[3],
+            geotransform[3] + geotransform[5] * self.raster_y_size,
+            geotransform[5]
+        )
+        latitudes.standard_name = "latitude"
+        latitudes.long_name = "latitude"
+        latitudes.units = "degrees_north"
+        latitudes.axis = "Y"
+
+        self.target.createDimension("lon", self.raster_x_size)
+        longitude = self.target.createVariable("lon", "f4", ("lon",))
+        longitude[:] = np.arange(
+            geotransform[0],
+            geotransform[0] + geotransform[1] * self.raster_x_size,
+            geotransform[1]
+        )
+        longitude.standard_name = "longitude"
+        longitude.long_name = "longitude"
+        longitude.units = "degree_east"
+        longitude.axis = "X"
+
+    def convert_using(self, calculator):
+        """Convert data writing it to netcdf4."""
+        if self.calculation_steps is None:
+            calculation_steps = [calculator.calculation_step]
+        else:
+            calculation_steps = self.calculation_steps
+
+        self._set_lat_lon()
+        self._set_time(calculator, calculation_steps)
+        self._set_meta_info(calculator)
+
+        water_depth = self.target.createVariable(
+            "water_depth", "f4", ("time", "lat", "lon",), fill_value=-9999, zlib=True
+        )
+        water_depth.long_name = "water depth"
+        water_depth.units = "m"
+
+        no_data_value = self.no_data_value
+        for i, calc_step in enumerate(calculation_steps, start=0):
+            calculator.calculation_step = calc_step
+            for (xoff, xsize), (yoff, ysize) in self.partition():
+                values = self.source.ReadAsArray(
+                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+                )
+                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+                result = calculator(
+                    indices=indices, values=values, no_data_value=no_data_value
+                )
+
+                water_depth[i, yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
 calculator_classes = {
