@@ -320,13 +320,20 @@ class GeoTIFFConverter:
         source_path (str): Path to source GeoTIFF file.
         target_path (str): Path to target GeoTIFF file.
         progress_func: a callable.
-        calculation_steps (list(int)): indexes of calculation steps for the waterdepth
+        calculation_steps (list(int)): indexes of calculation steps for the
+            waterdepth
 
         The progress_func will be called multiple times with values between 0.0
         amd 1.0.
     """
 
-    def __init__(self, source_path, target_path, progress_func=None, calculation_steps=None):
+    def __init__(
+            self,
+            source_path,
+            target_path,
+            progress_func=None,
+            calculation_steps=None
+    ):
         self.source_path = source_path
         self.target_path = target_path
         self.progress_func = progress_func
@@ -461,15 +468,11 @@ class NetcdfConverter(GeoTIFFConverter):
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
-        block_x_size, block_y_size = self.block_size
-        options = ["compress=deflate", "blocksize=%s" % block_y_size, "format=NC4"]
-        if block_x_size != self.raster_x_size:
-            options += ["tiled=yes", "blockxsize=%s" % block_x_size]
-
-        self.gridadmin = GridH5ResultAdmin(self.gridadmin_path, self.results_3di_path)
+        self.gridadmin = GridH5ResultAdmin(
+            self.gridadmin_path, self.results_3di_path
+        )
 
         self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
-
         self._set_lat_lon()
         self._set_time()
         self._set_meta_info()
@@ -530,7 +533,11 @@ class NetcdfConverter(GeoTIFFConverter):
     def convert_using(self, calculator):
         """Convert data writing it to netcdf4."""
         water_depth = self.target.createVariable(
-            "water_depth", "f4", ("time", "lat", "lon",), fill_value=-9999, zlib=True
+            "water_depth",
+            "f4",
+            ("time", "lat", "lon",),
+            fill_value=-9999,
+            zlib=True
         )
         water_depth.long_name = "water depth"
         water_depth.units = "m"
