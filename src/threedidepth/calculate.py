@@ -330,7 +330,10 @@ class GeoTIFFConverter:
         self.source_path = source_path
         self.target_path = target_path
         self.progress_func = progress_func
-        self.calculation_steps = calculation_steps
+        if calculation_steps is None:
+            self.calculation_steps = [-1, ]
+        else:
+            self.calculation_steps = calculation_steps
 
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
@@ -421,12 +424,7 @@ class GeoTIFFConverter:
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
-        if self.calculation_steps is None:
-            calculation_steps = [calculator.calculation_step]
-        else:
-            calculation_steps = self.calculation_steps
-
-        for i, calc_step in enumerate(calculation_steps, start=1):
+        for i, calc_step in enumerate(self.calculation_steps, start=1):
             calculator.calculation_step = calc_step
             no_data_value = self.no_data_value
             for (xoff, xsize), (yoff, ysize) in self.partition():
@@ -518,15 +516,6 @@ class NetcdfConverter(GeoTIFFConverter):
 
     def convert_using(self, calculator):
         """Convert data writing it to netcdf4."""
-        if self.calculation_steps is None:
-            calculation_steps = [calculator.calculation_step]
-        else:
-            calculation_steps = self.calculation_steps
-
-        self._set_lat_lon()
-        self._set_time(calculator, calculation_steps)
-        self._set_meta_info(calculator)
-
         water_depth = self.target.createVariable(
             "water_depth", "f4", ("time", "lat", "lon",), fill_value=-9999, zlib=True
         )
@@ -534,7 +523,7 @@ class NetcdfConverter(GeoTIFFConverter):
         water_depth.units = "m"
 
         no_data_value = self.no_data_value
-        for i, calc_step in enumerate(calculation_steps, start=0):
+        for i, calc_step in enumerate(self.calculation_steps, start=0):
             calculator.calculation_step = calc_step
             for (xoff, xsize), (yoff, ysize) in self.partition():
                 values = self.source.ReadAsArray(
@@ -565,7 +554,7 @@ def calculate_waterdepth(
     results_3di_path,
     dem_path,
     waterdepth_path,
-    calculation_step=-1,
+    calculation_steps=None,
     mode=MODE_LIZARD,
     progress_func=None,
 ):
@@ -576,9 +565,12 @@ def calculate_waterdepth(
         results_3di_path (str): Path to results_3di.nc file.
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
-        calculation_step (int): Calculation step (default: -1 (last))
-        interpolate (bool): Interpolate linearly between nodes.
+        calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        mode (str): Interpolation mode.
     """
+    if calculation_steps is None:
+        calculation_steps = [-1]
+
     try:
         CalculatorClass = calculator_classes[mode]
     except KeyError:
@@ -591,6 +583,7 @@ def calculate_waterdepth(
         "source_path": dem_path,
         "target_path": waterdepth_path,
         "progress_func": progress_func,
+        "calculation_steps": calculation_steps,
     }
 
     with GeoTIFFConverter(**converter_kwargs) as converter:
@@ -598,7 +591,7 @@ def calculate_waterdepth(
         calculator_kwargs = {
             "gridadmin_path": gridadmin_path,
             "results_3di_path": results_3di_path,
-            "calculation_step": calculation_step,
+            "calculation_step": calculation_steps[0],
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import sys
 
 from osgeo import gdal
 
@@ -29,11 +30,12 @@ def threedidepth(*args):
     )
     parser.add_argument(
         "-s",
-        "--step",
+        "--steps",
+        nargs="+",
         type=int,
-        default=-1,
-        dest="calculation_step",
-        help="simulation result step",
+        default=[-1, ],
+        dest="calculation_steps",
+        help="simulation result step(s)",
     )
     parser.add_argument(
         "-c",
@@ -55,3 +57,7 @@ def threedidepth(*args):
     else:
         kwargs["mode"] = MODE_LIZARD
     calculate_waterdepth(**kwargs)
+
+
+if __name__ == '__main__':
+    threedidepth(sys.argv)
