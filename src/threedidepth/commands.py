@@ -51,6 +51,12 @@ def threedidepth(*args):
         const=gdal.TermProgress_nocb,
         help="Show progress.",
     )
+    parser.add_argument(
+        "-n",
+        "--netcdf",
+        action="store_true",
+        help="export the waterdepth as a netcdf"
+    )
     kwargs = vars(parser.parse_args())
     if kwargs.pop("constant"):
         kwargs["mode"] = MODE_CONSTANT

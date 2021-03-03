@@ -21,6 +21,7 @@ def test_command(tmpdir):
             calculation_steps=[-1],
             mode=commands.MODE_LIZARD,
             progress_func=None,
+            netcdf=False
         )
         args.append("--constant")
         with mock.patch.object(sys, "argv", args):
@@ -33,6 +34,7 @@ def test_command(tmpdir):
             calculation_steps=[-1],
             mode=commands.MODE_CONSTANT,
             progress_func=None,
+            netcdf=False
         )
 
 

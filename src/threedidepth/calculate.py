@@ -444,10 +444,19 @@ class GeoTIFFConverter:
 class NetcdfConverter(GeoTIFFConverter):
     """Convert NetCDF4 according to the CF-1.6 standards."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+            self,
+            source_path,
+            target_path,
+            gridadmin_path=None,
+            results_3di_path=None,
+            **kwargs
+    ):
         if netCDF4 is None:
             raise ImportError("Could not import netCDF4")
-        super.__init__(*args, **kwargs)
+        super().__init__(source_path, target_path, **kwargs)
+        self.gridadmin_path = gridadmin_path
+        self.results_3di_path = results_3di_path
 
     def __enter__(self):
         """Open datasets"""
@@ -457,33 +466,37 @@ class NetcdfConverter(GeoTIFFConverter):
         if block_x_size != self.raster_x_size:
             options += ["tiled=yes", "blockxsize=%s" % block_x_size]
 
+        self.gridadmin = GridH5ResultAdmin(self.gridadmin_path, self.results_3di_path)
+
         self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
+
+        self._set_lat_lon()
+        self._set_time()
+        self._set_meta_info()
 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Close datasets"""
         self.source = None
+        self.gridadmin.close()
         self.target.close()
 
-    def _set_meta_info(self, calculator):
+    def _set_meta_info(self):
         """Set meta info in the root group"""
-        gr = calculator.gr
         self.target.Conventions = "CF-1.6"
         self.target.institution = "3Di Waterbeheer"
-        self.target.model_slug = gr.model_slug
+        self.target.model_slug = self.gridadmin.model_slug
         self.target.result_type = "Derived water depth"
         self.target.references = "http://3di.nu"
 
-    def _set_time(self, calculator, calculation_steps):
+    def _set_time(self):
         """Set time"""
-        gr = calculator.gr
-
-        self.target.createDimension("time", len(calculation_steps))
+        self.target.createDimension("time", len(self.calculation_steps))
         time = self.target.createVariable("time", "f4", ("time",))
-        time[:] = gr.nodes.timestamps[calculation_steps]
+        time[:] = self.gridadmin.nodes.timestamps[self.calculation_steps]
         time.standard_name = "time"
-        time.units = gr.time_units.decode("utf-8")
+        time.units = self.gridadmin.time_units.decode("utf-8")
         time.calendar = "standard"
         time.axis = "T"
 
@@ -557,6 +570,7 @@ def calculate_waterdepth(
     calculation_steps=None,
     mode=MODE_LIZARD,
     progress_func=None,
+    netcdf=False,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
 
@@ -585,8 +599,14 @@ def calculate_waterdepth(
         "progress_func": progress_func,
         "calculation_steps": calculation_steps,
     }
+    if netcdf:
+        converter_class = NetcdfConverter
+        converter_kwargs['gridadmin_path'] = gridadmin_path
+        converter_kwargs['results_3di_path'] = results_3di_path
+    else:
+        converter_class = GeoTIFFConverter
 
-    with GeoTIFFConverter(**converter_kwargs) as converter:
+    with converter_class(**converter_kwargs) as converter:
 
         calculator_kwargs = {
             "gridadmin_path": gridadmin_path,
