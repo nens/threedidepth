@@ -552,7 +552,6 @@ class NetcdfConverter(GeoTIFFConverter):
         projection.epsg = self.gridadmin.epsg_code
         projection.long_name = "Spatial Reference"
 
-
     def convert_using(self, calculator):
         """Convert data writing it to netcdf4."""
         water_depth = self.target.createVariable(
