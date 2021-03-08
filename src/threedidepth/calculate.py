@@ -515,9 +515,13 @@ class NetcdfConverter(GeoTIFFConverter):
 
         self.target.createDimension("lat", self.raster_y_size)
         latitudes = self.target.createVariable("lat", "f4", ("lat",))
+
+        # In CF-1.6 the coordinates are cell centers, while GDAL interprets
+        # them as the upper-left corner.
+        y_upper_left = geotransform[3] + geotransform[5] / 2
         latitudes[:] = np.arange(
-            geotransform[3],
-            geotransform[3] + geotransform[5] * self.raster_y_size,
+            y_upper_left,
+            y_upper_left + geotransform[5] * self.raster_y_size,
             geotransform[5]
         )
         latitudes.standard_name = "latitude"
@@ -527,9 +531,13 @@ class NetcdfConverter(GeoTIFFConverter):
 
         self.target.createDimension("lon", self.raster_x_size)
         longitude = self.target.createVariable("lon", "f4", ("lon",))
+
+        # CF 1.6 coordinates are cell center, while GDAL interprets
+        # them as the upper-left corner.
+        x_upper_left = geotransform[0] + geotransform[1] / 2
         longitude[:] = np.arange(
-            geotransform[0],
-            geotransform[0] + geotransform[1] * self.raster_x_size,
+            x_upper_left,
+            x_upper_left + geotransform[1] * self.raster_x_size,
             geotransform[1]
         )
         longitude.standard_name = "longitude"
