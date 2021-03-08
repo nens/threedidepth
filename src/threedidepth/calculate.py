@@ -3,6 +3,10 @@
 from itertools import product
 from os import path
 
+try:
+    import netCDF4
+except ImportError:
+    netCDF4 = None
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import qhull
@@ -70,6 +74,15 @@ class Calculator:
         no_data_value argument.
         """
         raise NotImplementedError
+
+    @property
+    def calculation_step(self):
+        return self._calculation_step
+
+    @calculation_step.setter
+    def calculation_step(self, value):
+        self.cache = {}
+        self._calculation_step = value
 
     @staticmethod
     def _depth_from_water_level(dem, fillvalue, waterlevel):
@@ -307,15 +320,27 @@ class GeoTIFFConverter:
         source_path (str): Path to source GeoTIFF file.
         target_path (str): Path to target GeoTIFF file.
         progress_func: a callable.
+        calculation_steps (list(int)): indexes of calculation steps for the
+            waterdepth
 
         The progress_func will be called multiple times with values between 0.0
         amd 1.0.
     """
 
-    def __init__(self, source_path, target_path, progress_func=None):
+    def __init__(
+            self,
+            source_path,
+            target_path,
+            progress_func=None,
+            calculation_steps=None
+    ):
         self.source_path = source_path
         self.target_path = target_path
         self.progress_func = progress_func
+        if calculation_steps is None:
+            self.calculation_steps = [-1, ]
+        else:
+            self.calculation_steps = calculation_steps
 
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
@@ -329,11 +354,16 @@ class GeoTIFFConverter:
         if block_x_size != self.raster_x_size:
             options += ["tiled=yes", "blockxsize=%s" % block_x_size]
 
+        if self.calculation_steps is None:
+            band_count = 1
+        else:
+            band_count = len(self.calculation_steps)
+
         self.target = gdal.GetDriverByName("gtiff").Create(
             self.target_path,
             self.raster_x_size,
             self.raster_y_size,
-            1,  # band count
+            band_count,  # band count
             self.source.GetRasterBand(1).DataType,
             options=options,
         )
@@ -380,8 +410,11 @@ class GeoTIFFConverter:
         blocks_y = -(-self.raster_y_size // block_size[1])
         return blocks_x * blocks_y
 
-    def partition(self):
+    def partition(self, calculation_step=0):
         """Return generator of (xoff, xsize), (yoff, ysize) values.
+
+        Args:
+            calculation_step (int): index of calculation_step
         """
 
         def offset_size_range(stop, step):
@@ -397,23 +430,153 @@ class GeoTIFFConverter:
         for count, result in enumerate(generator, start=1):
             yield result[::-1]
             if self.progress_func is not None:
-                self.progress_func(count / total)
+                progress_current_raster = count / total
+                total_progress = progress_current_raster + calculation_step
+                self.progress_func(
+                    total_progress / len(self.calculation_steps)
+                )
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
-        no_data_value = self.no_data_value
-        for (xoff, xsize), (yoff, ysize) in self.partition():
-            values = self.source.ReadAsArray(
-                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
-            )
-            indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
-            result = calculator(
-                indices=indices, values=values, no_data_value=no_data_value
-            )
+        for i, calc_step in enumerate(self.calculation_steps, start=1):
+            calculator.calculation_step = calc_step
+            no_data_value = self.no_data_value
+            for (xoff, xsize), (yoff, ysize) in self.partition(i-1):
+                values = self.source.ReadAsArray(
+                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+                )
+                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+                result = calculator(
+                    indices=indices, values=values, no_data_value=no_data_value
+                )
 
-            self.target.GetRasterBand(1).WriteArray(
-                array=result, xoff=xoff, yoff=yoff,
-            )
+                self.target.GetRasterBand(i).WriteArray(
+                    array=result, xoff=xoff, yoff=yoff,
+                )
+
+
+class NetcdfConverter(GeoTIFFConverter):
+    """Convert NetCDF4 according to the CF-1.6 standards."""
+
+    def __init__(
+            self,
+            source_path,
+            target_path,
+            gridadmin_path=None,
+            results_3di_path=None,
+            **kwargs
+    ):
+        if netCDF4 is None:
+            raise ImportError("Could not import netCDF4")
+        super().__init__(source_path, target_path, **kwargs)
+        self.gridadmin_path = gridadmin_path
+        self.results_3di_path = results_3di_path
+
+    def __enter__(self):
+        """Open datasets"""
+        self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
+        self.gridadmin = GridH5ResultAdmin(
+            self.gridadmin_path, self.results_3di_path
+        )
+
+        self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
+        self._set_lat_lon()
+        self._set_time()
+        self._set_meta_info()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close datasets"""
+        self.source = None
+        self.gridadmin.close()
+        self.target.close()
+
+    def _set_meta_info(self):
+        """Set meta info in the root group"""
+        self.target.Conventions = "CF-1.6"
+        self.target.institution = "3Di Waterbeheer"
+        self.target.model_slug = self.gridadmin.model_slug
+        self.target.result_type = "Derived water depth"
+        self.target.references = "http://3di.nu"
+
+    def _set_time(self):
+        """Set time"""
+        self.target.createDimension("time", len(self.calculation_steps))
+        time = self.target.createVariable("time", "f4", ("time",))
+        time[:] = self.gridadmin.nodes.timestamps[self.calculation_steps]
+        time.standard_name = "time"
+        time.units = self.gridadmin.time_units.decode("utf-8")
+        time.calendar = "standard"
+        time.axis = "T"
+
+    def _set_lat_lon(self):
+        geotransform = self.source.GetGeoTransform()
+
+        self.target.createDimension("lat", self.raster_y_size)
+        latitudes = self.target.createVariable("lat", "f4", ("lat",))
+
+        # In CF-1.6 the coordinates are cell centers, while GDAL interprets
+        # them as the upper-left corner.
+        y_upper_left = geotransform[3] + geotransform[5] / 2
+        latitudes[:] = np.arange(
+            y_upper_left,
+            y_upper_left + geotransform[5] * self.raster_y_size,
+            geotransform[5]
+        )
+        latitudes.standard_name = "latitude"
+        latitudes.long_name = "latitude"
+        latitudes.units = "degrees_north"
+        latitudes.axis = "Y"
+
+        self.target.createDimension("lon", self.raster_x_size)
+        longitude = self.target.createVariable("lon", "f4", ("lon",))
+
+        # CF 1.6 coordinates are cell center, while GDAL interprets
+        # them as the upper-left corner.
+        x_upper_left = geotransform[0] + geotransform[1] / 2
+        longitude[:] = np.arange(
+            x_upper_left,
+            x_upper_left + geotransform[1] * self.raster_x_size,
+            geotransform[1]
+        )
+        longitude.standard_name = "longitude"
+        longitude.long_name = "longitude"
+        longitude.units = "degree_east"
+        longitude.axis = "X"
+
+        projection = self.target.createVariable(
+            "projected_coordinate_system", "i4"
+        )
+        projection.EPSG_code = f"EPSG:{self.gridadmin.epsg_code}"
+        projection.epsg = self.gridadmin.epsg_code
+        projection.long_name = "Spatial Reference"
+
+    def convert_using(self, calculator):
+        """Convert data writing it to netcdf4."""
+        water_depth = self.target.createVariable(
+            "water_depth",
+            "f4",
+            ("time", "lat", "lon",),
+            fill_value=-9999,
+            zlib=True
+        )
+        water_depth.long_name = "water depth"
+        water_depth.units = "m"
+
+        no_data_value = self.no_data_value
+        for i, calc_step in enumerate(self.calculation_steps, start=0):
+            calculator.calculation_step = calc_step
+            for (xoff, xsize), (yoff, ysize) in self.partition(i):
+                values = self.source.ReadAsArray(
+                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+                )
+                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+                result = calculator(
+                    indices=indices, values=values, no_data_value=no_data_value
+                )
+
+                water_depth[i, yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
 calculator_classes = {
@@ -433,9 +596,10 @@ def calculate_waterdepth(
     results_3di_path,
     dem_path,
     waterdepth_path,
-    calculation_step=-1,
+    calculation_steps=None,
     mode=MODE_LIZARD,
     progress_func=None,
+    netcdf=False,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
 
@@ -444,9 +608,12 @@ def calculate_waterdepth(
         results_3di_path (str): Path to results_3di.nc file.
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
-        calculation_step (int): Calculation step (default: -1 (last))
-        interpolate (bool): Interpolate linearly between nodes.
+        calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        mode (str): Interpolation mode.
     """
+    if calculation_steps is None:
+        calculation_steps = [-1]
+
     try:
         CalculatorClass = calculator_classes[mode]
     except KeyError:
@@ -459,14 +626,21 @@ def calculate_waterdepth(
         "source_path": dem_path,
         "target_path": waterdepth_path,
         "progress_func": progress_func,
+        "calculation_steps": calculation_steps,
     }
+    if netcdf:
+        converter_class = NetcdfConverter
+        converter_kwargs['gridadmin_path'] = gridadmin_path
+        converter_kwargs['results_3di_path'] = results_3di_path
+    else:
+        converter_class = GeoTIFFConverter
 
-    with GeoTIFFConverter(**converter_kwargs) as converter:
+    with converter_class(**converter_kwargs) as converter:
 
         calculator_kwargs = {
             "gridadmin_path": gridadmin_path,
             "results_3di_path": results_3di_path,
-            "calculation_step": calculation_step,
+            "calculation_step": calculation_steps[0],
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }

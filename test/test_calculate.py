@@ -17,6 +17,7 @@ from threedidepth.calculate import Calculator
 from threedidepth.calculate import GeoTIFFConverter
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import calculator_classes
+from threedidepth.calculate import NetcdfConverter
 from threedidepth.calculate import MODE_COPY
 from threedidepth.calculate import MODE_NODGRID
 from threedidepth.calculate import MODE_CONSTANT_S1
@@ -132,6 +133,69 @@ def test_tiff_converter_existing_target(tmpdir):
     with raises(OSError, match="exists"):
         GeoTIFFConverter(
             source_path=None, target_path=target_path, progress_func=None)
+
+
+@mark.parametrize("source_path", [False, True], indirect=True)
+def test_multiple_calculation_steps(source_path, target_path):
+    progress_func = mock.Mock()
+    calculation_steps = [1, 2, 3]
+    converter_kwargs = {
+        "source_path": source_path,
+        "target_path": target_path,
+        "progress_func": progress_func,
+        "calculation_steps": calculation_steps
+    }
+
+    def calculator(indices, values, no_data_value):
+        """Return input values unmodified."""
+        return values
+
+    with GeoTIFFConverter(**converter_kwargs) as converter:
+        converter.convert_using(calculator)
+
+        assert len(converter) * len(calculation_steps) == len(
+            progress_func.call_args_list
+        )
+        assert progress_func.call_args_list[0][0][0] < 1
+        assert progress_func.call_args_list[-1][0][0] == 1
+
+    target = gdal.Open(target_path)
+    assert target.RasterCount == len(calculation_steps)
+
+
+@mark.parametrize("source_path", [False, True], indirect=True)
+def test_netcdf_converter(source_path, tmp_path, admin):
+    admin.nodes.timestamps = np.arange(10, dtype=np.float32)
+    admin.time_units = b'seconds since 2021-03-02 10:00:00'
+    admin.model_slug = "my_model_slug"
+    admin.epsg_code = "28992"
+    target_path = str(tmp_path / "waterdepth.nc")
+
+    progress_func = mock.Mock()
+    converter_kwargs = {
+        "source_path": source_path,
+        "target_path": target_path,
+        "progress_func": progress_func,
+        "gridadmin_path": "dummy",
+        "results_3di_path": "dummy",
+    }
+
+    def calculator(indices, values, no_data_value):
+        """Return input values unmodified."""
+        return values
+
+    with NetcdfConverter(**converter_kwargs) as converter:
+        converter.convert_using(calculator)
+
+        assert len(converter) == len(progress_func.call_args_list)
+        assert progress_func.call_args_list[0][0][0] < 1
+        assert progress_func.call_args_list[-1][0][0] == 1
+
+    source = gdal.Open(source_path)
+    target = gdal.Open(target_path)
+
+    assert np.equal(source.ReadAsArray(), target.ReadAsArray()).all()
+    assert source.GetGeoTransform() == target.GetGeoTransform()
 
 
 def test_calculate_waterdepth_wrong_mode():
