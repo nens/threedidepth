@@ -545,6 +545,14 @@ class NetcdfConverter(GeoTIFFConverter):
         longitude.units = "degree_east"
         longitude.axis = "X"
 
+        projection = self.target.createVariable(
+            "projected_coordinate_system", "i4"
+        )
+        projection.EPSG_code = f"EPSG:{self.gridadmin.epsg_code}"
+        projection.epsg = self.gridadmin.epsg_code
+        projection.long_name = "Spatial Reference"
+
+
     def convert_using(self, calculator):
         """Convert data writing it to netcdf4."""
         water_depth = self.target.createVariable(
