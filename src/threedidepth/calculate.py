@@ -408,10 +408,13 @@ class GeoTIFFConverter:
         block_size = self.block_size
         blocks_x = -(-self.raster_x_size // block_size[0])
         blocks_y = -(-self.raster_y_size // block_size[1])
-        return blocks_x * blocks_y * len(self.calculation_steps)
+        return blocks_x * blocks_y
 
-    def partition(self):
+    def partition(self, calculation_step=0):
         """Return generator of (xoff, xsize), (yoff, ysize) values.
+
+        Args:
+            calculation_step (int): index of calculation_step
         """
 
         def offset_size_range(stop, step):
@@ -427,14 +430,18 @@ class GeoTIFFConverter:
         for count, result in enumerate(generator, start=1):
             yield result[::-1]
             if self.progress_func is not None:
-                self.progress_func(count / total)
+                progress_current_raster = count / total
+                total_progress = progress_current_raster + calculation_step
+                self.progress_func(
+                    total_progress / len(self.calculation_steps)
+                )
 
     def convert_using(self, calculator):
         """Convert data writing it to tiff. """
         for i, calc_step in enumerate(self.calculation_steps, start=1):
             calculator.calculation_step = calc_step
             no_data_value = self.no_data_value
-            for (xoff, xsize), (yoff, ysize) in self.partition():
+            for (xoff, xsize), (yoff, ysize) in self.partition(i-1):
                 values = self.source.ReadAsArray(
                     xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
                 )
@@ -545,7 +552,7 @@ class NetcdfConverter(GeoTIFFConverter):
         no_data_value = self.no_data_value
         for i, calc_step in enumerate(self.calculation_steps, start=0):
             calculator.calculation_step = calc_step
-            for (xoff, xsize), (yoff, ysize) in self.partition():
+            for (xoff, xsize), (yoff, ysize) in self.partition(i):
                 values = self.source.ReadAsArray(
                     xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
                 )
