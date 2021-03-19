@@ -13,20 +13,21 @@ from pytest import mark
 from pytest import raises
 import numpy as np
 
-from threedidepth.calculate import Calculator
+from threedidepth.calculate import BaseCalculator
 from threedidepth.calculate import GeoTIFFConverter
+from threedidepth.calculate import MODE_CONSTANT
+from threedidepth.calculate import MODE_CONSTANT_S1
+from threedidepth.calculate import MODE_COPY
+from threedidepth.calculate import MODE_LINEAR
+from threedidepth.calculate import MODE_LINEAR_S1
+from threedidepth.calculate import MODE_LIZARD
+from threedidepth.calculate import MODE_LIZARD_S1
+from threedidepth.calculate import MODE_NODGRID
+from threedidepth.calculate import NetcdfConverter
+from threedidepth.calculate import ProgressClass
+from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import calculator_classes
-from threedidepth.calculate import NetcdfConverter
-from threedidepth.calculate import MODE_COPY
-from threedidepth.calculate import MODE_NODGRID
-from threedidepth.calculate import MODE_CONSTANT_S1
-from threedidepth.calculate import MODE_LINEAR_S1
-from threedidepth.calculate import MODE_LIZARD_S1
-from threedidepth.calculate import MODE_CONSTANT
-from threedidepth.calculate import MODE_LINEAR
-from threedidepth.calculate import MODE_LIZARD
-from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 NDV = -9  # no data value of the test dem
@@ -95,12 +96,30 @@ def admin():
         yield grid_h5_result_admin
 
 
-@mark.parametrize("source_path", [False, True], indirect=True)
-def test_tiff_converter(source_path, target_path):
+def test_progress_class():
     progress_func = mock.Mock()
+    calculation_steps = [10, 20]
+    progress_class = ProgressClass(
+        calculation_steps=[10, 20],
+        progress_func=progress_func,
+    )
+    for i, calculation_step in progress_class:
+        assert calculation_step == calculation_steps[i]
+        progress_class(0.5)
+        assert progress_func.called_with(i + 0.25)
+        progress_class(1.0)
+        assert progress_func.called_with(i + 0.50)
+
+
+@mark.parametrize("source_path", [False, True], indirect=True)
+def test_geotiff_converter(source_path, target_path):
+    progress_func = mock.Mock()
+    band_count = 3
+    band_no = 1
     converter_kwargs = {
         "source_path": source_path,
         "target_path": target_path,
+        "band_count": band_count,
         "progress_func": progress_func,
     }
 
@@ -109,22 +128,35 @@ def test_tiff_converter(source_path, target_path):
         return values
 
     with GeoTIFFConverter(**converter_kwargs) as converter:
-        converter.convert_using(calculator)
-
+        converter.convert_using(calculator=calculator, band=band_no)
         assert len(converter) == len(progress_func.call_args_list)
-        assert progress_func.call_args_list[0][0][0] < 1
-        assert progress_func.call_args_list[-1][0][0] == 1
 
+    # check target
     source = gdal.Open(source_path)
+    source_array = source.ReadAsArray()
     source_band = source.GetRasterBand(1)
-    target = gdal.Open(target_path)
-    target_band = target.GetRasterBand(1)
+    source_no_data_value = source_band.GetNoDataValue()
+    source_block_size = source_band.GetBlockSize()
 
-    assert np.equal(source.ReadAsArray(), target.ReadAsArray()).all()
+    target = gdal.Open(target_path)
+    target_array = target.ReadAsArray()
+    target_bands = [target.GetRasterBand(i + 1) for i in range(band_count)]
+    target_no_data_values = [b.GetNoDataValue() for b in target_bands]
+    target_block_sizes = [b.GetBlockSize() for b in target_bands]
+
     assert source.GetGeoTransform() == target.GetGeoTransform()
     assert source.GetProjection() == target.GetProjection()
-    assert source_band.GetNoDataValue() == target_band.GetNoDataValue()
-    assert source_band.GetBlockSize() == target_band.GetBlockSize()
+    assert all(source_block_size == v for v in target_block_sizes)
+    assert all(source_no_data_value == v for v in target_no_data_values)
+    assert len(target_array) == band_count
+    assert np.equal(source_array, target_array[band_no]).all()
+    assert np.equal(0, target_array[[0, 2]]).all()
+
+    # check progess func calls
+    progress_func_values = [r[0][0] for r in progress_func.call_args_list]
+    assert progress_func_values[0] < 1
+    assert progress_func_values[-1] == 1
+    assert progress_func_values == sorted(progress_func_values)
 
 
 def test_tiff_converter_existing_target(tmpdir):
@@ -133,34 +165,6 @@ def test_tiff_converter_existing_target(tmpdir):
     with raises(OSError, match="exists"):
         GeoTIFFConverter(
             source_path=None, target_path=target_path, progress_func=None)
-
-
-@mark.parametrize("source_path", [False, True], indirect=True)
-def test_multiple_calculation_steps(source_path, target_path):
-    progress_func = mock.Mock()
-    calculation_steps = [1, 2, 3]
-    converter_kwargs = {
-        "source_path": source_path,
-        "target_path": target_path,
-        "progress_func": progress_func,
-        "calculation_steps": calculation_steps
-    }
-
-    def calculator(indices, values, no_data_value):
-        """Return input values unmodified."""
-        return values
-
-    with GeoTIFFConverter(**converter_kwargs) as converter:
-        converter.convert_using(calculator)
-
-        assert len(converter) * len(calculation_steps) == len(
-            progress_func.call_args_list
-        )
-        assert progress_func.call_args_list[0][0][0] < 1
-        assert progress_func.call_args_list[-1][0][0] == 1
-
-    target = gdal.Open(target_path)
-    assert target.RasterCount == len(calculation_steps)
 
 
 @mark.parametrize("source_path", [False, True], indirect=True)
@@ -175,9 +179,10 @@ def test_netcdf_converter(source_path, tmp_path, admin):
     converter_kwargs = {
         "source_path": source_path,
         "target_path": target_path,
-        "progress_func": progress_func,
         "gridadmin_path": "dummy",
         "results_3di_path": "dummy",
+        "calculation_steps": [-1],
+        "progress_func": progress_func,
     }
 
     def calculator(indices, values, no_data_value):
@@ -185,7 +190,7 @@ def test_netcdf_converter(source_path, tmp_path, admin):
         return values
 
     with NetcdfConverter(**converter_kwargs) as converter:
-        converter.convert_using(calculator)
+        converter.convert_using(calculator, band=0)
 
         assert len(converter) == len(progress_func.call_args_list)
         assert progress_func.call_args_list[0][0][0] < 1
@@ -224,7 +229,7 @@ def test_depth_from_water_level():
     dem = np.array([[7.0, 2.0], [3.0, 4.0]])
     fillvalue = 7.0
     waterlevel = np.array([[4.0, NDV], [4.0, 4.0]])
-    depth = Calculator._depth_from_water_level(
+    depth = BaseCalculator._depth_from_water_level(
         dem=dem, fillvalue=fillvalue, waterlevel=waterlevel,
     )
     assert depth[0, 0] == fillvalue  # because dem is fillvalue
@@ -361,7 +366,9 @@ def test_calculators(mode, expected, admin):
 
 @fixture
 def depthmock():
-    import_path = "threedidepth.calculate.Calculator._depth_from_water_level"
+    import_path = (
+        "threedidepth.calculate.BaseCalculator._depth_from_water_level"
+    )
     with mock.patch(import_path) as depthmock:
         yield depthmock
 
@@ -391,4 +398,4 @@ def test_depth_calculators(depthmock, mode):
 
 def test_calculator_not_implemented():
     with raises(NotImplementedError):
-        Calculator("", "", "", "", "")("", "", "")
+        BaseCalculator("", "", "", "", "")("", "", "")

@@ -28,13 +28,13 @@ MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
 
 
-class Calculator:
+class BaseCalculator:
     """Depth calculator using constant waterlevel in a grid cell.
 
     Args:
         gridadmin_path (str): Path to gridadmin.h5 file.
         results_3di_path (str): Path to results_3di.nc file.
-        calculation_step (int): Calculation step for the waterdepth.
+        calculation_step (int): Calculation step.
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
     """
@@ -74,15 +74,6 @@ class Calculator:
         no_data_value argument.
         """
         raise NotImplementedError
-
-    @property
-    def calculation_step(self):
-        return self._calculation_step
-
-    @calculation_step.setter
-    def calculation_step(self, value):
-        self.cache = {}
-        self._calculation_step = value
 
     @staticmethod
     def _depth_from_water_level(dem, fillvalue, waterlevel):
@@ -198,32 +189,32 @@ class Calculator:
         self.cache = None
 
 
-class CopyCalculator(Calculator):
+class CopyCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return input values unmodified."""
         return values
 
 
-class NodGridCalculator(Calculator):
+class NodGridCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return node grid."""
         return self._get_nodgrid(indices)
 
 
-class ConstantLevelCalculator(Calculator):
+class ConstantLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         return self.lookup_s1[self._get_nodgrid(indices)]
 
 
-class LinearLevelCalculator(Calculator):
+class LinearLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         points = self._get_points(indices)
         return self.interpolator(points).reshape(values.shape)
 
 
-class LizardLevelCalculator(Calculator):
+class LizardLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """ Return waterlevel array.
 
@@ -319,9 +310,8 @@ class GeoTIFFConverter:
     Args:
         source_path (str): Path to source GeoTIFF file.
         target_path (str): Path to target GeoTIFF file.
+        band_count (int): Number of bands in the target file.
         progress_func: a callable.
-        calculation_steps (list(int)): indexes of calculation steps for the
-            waterdepth
 
         The progress_func will be called multiple times with values between 0.0
         amd 1.0.
@@ -331,16 +321,13 @@ class GeoTIFFConverter:
             self,
             source_path,
             target_path,
+            band_count=1,
             progress_func=None,
-            calculation_steps=None
     ):
         self.source_path = source_path
         self.target_path = target_path
+        self.band_count = band_count
         self.progress_func = progress_func
-        if calculation_steps is None:
-            self.calculation_steps = [-1, ]
-        else:
-            self.calculation_steps = calculation_steps
 
         if path.exists(self.target_path):
             raise OSError("%s already exists." % self.target_path)
@@ -354,16 +341,11 @@ class GeoTIFFConverter:
         if block_x_size != self.raster_x_size:
             options += ["tiled=yes", "blockxsize=%s" % block_x_size]
 
-        if self.calculation_steps is None:
-            band_count = 1
-        else:
-            band_count = len(self.calculation_steps)
-
         self.target = gdal.GetDriverByName("gtiff").Create(
             self.target_path,
             self.raster_x_size,
             self.raster_y_size,
-            band_count,  # band count
+            self.band_count,
             self.source.GetRasterBand(1).DataType,
             options=options,
         )
@@ -410,49 +392,51 @@ class GeoTIFFConverter:
         blocks_y = -(-self.raster_y_size // block_size[1])
         return blocks_x * blocks_y
 
-    def partition(self, calculation_step=0):
-        """Return generator of (xoff, xsize), (yoff, ysize) values.
-
-        Args:
-            calculation_step (int): index of calculation_step
+    def partition(self):
+        """Return generator of band_no, (xoff, xsize), (yoff, ysize) values.
         """
-
         def offset_size_range(stop, step):
             for start in range(0, stop, step):
                 yield start, min(step, stop - start)
 
-        # tiled tiff writing is much faster row-wise
+        # make y the outer loop, tiled tiff writing is much faster row-wise...
         raster_size = self.raster_y_size, self.raster_x_size
         block_size = self.block_size[::-1]
         generator = product(*map(offset_size_range, raster_size, block_size))
 
         total = len(self)
-        for count, result in enumerate(generator, start=1):
-            yield result[::-1]
+        for count, (y_part, x_part) in enumerate(generator, start=1):
+            # ...and in the result put x before y
+            yield x_part, y_part
             if self.progress_func is not None:
-                progress_current_raster = count / total
-                total_progress = progress_current_raster + calculation_step
-                self.progress_func(
-                    total_progress / len(self.calculation_steps)
-                )
+                self.progress_func(count / total)
 
-    def convert_using(self, calculator):
-        """Convert data writing it to tiff. """
-        for i, calc_step in enumerate(self.calculation_steps, start=1):
-            calculator.calculation_step = calc_step
-            no_data_value = self.no_data_value
-            for (xoff, xsize), (yoff, ysize) in self.partition(i-1):
-                values = self.source.ReadAsArray(
-                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
-                )
-                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
-                result = calculator(
-                    indices=indices, values=values, no_data_value=no_data_value
-                )
+    def convert_using(self, calculator, band):
+        """Convert data writing it to tiff.
 
-                self.target.GetRasterBand(i).WriteArray(
-                    array=result, xoff=xoff, yoff=yoff,
-                )
+        Args:
+            calculator (BaseCalculator): Calculator implementation instance
+            band (int): Which band to write to.
+        """
+        no_data_value = self.no_data_value
+        for (xoff, xsize), (yoff, ysize) in self.partition():
+            # read
+            values = self.source.ReadAsArray(
+                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+            )
+            indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+
+            # calculate
+            result = calculator(
+                indices=indices,
+                values=values,
+                no_data_value=no_data_value,
+            )
+
+            # write - note GDAL counts bands starting at 1
+            self.target.GetRasterBand(band + 1).WriteArray(
+                array=result, xoff=xoff, yoff=yoff,
+            )
 
 
 class NetcdfConverter(GeoTIFFConverter):
@@ -462,15 +446,18 @@ class NetcdfConverter(GeoTIFFConverter):
             self,
             source_path,
             target_path,
-            gridadmin_path=None,
-            results_3di_path=None,
+            gridadmin_path,
+            results_3di_path,
+            calculation_steps,
             **kwargs
     ):
         if netCDF4 is None:
             raise ImportError("Could not import netCDF4")
         super().__init__(source_path, target_path, **kwargs)
+
         self.gridadmin_path = gridadmin_path
         self.results_3di_path = results_3di_path
+        self.calculation_steps = calculation_steps
 
     def __enter__(self):
         """Open datasets"""
@@ -502,7 +489,7 @@ class NetcdfConverter(GeoTIFFConverter):
 
     def _set_time(self):
         """Set time"""
-        self.target.createDimension("time", len(self.calculation_steps))
+        self.target.createDimension("time", self.band_count)
         time = self.target.createVariable("time", "f4", ("time",))
         time[:] = self.gridadmin.nodes.timestamps[self.calculation_steps]
         time.standard_name = "time"
@@ -552,7 +539,7 @@ class NetcdfConverter(GeoTIFFConverter):
         projection.epsg = self.gridadmin.epsg_code
         projection.long_name = "Spatial Reference"
 
-    def convert_using(self, calculator):
+    def convert_using(self, calculator, band):
         """Convert data writing it to netcdf4."""
         water_depth = self.target.createVariable(
             "water_depth",
@@ -565,18 +552,50 @@ class NetcdfConverter(GeoTIFFConverter):
         water_depth.units = "m"
 
         no_data_value = self.no_data_value
-        for i, calc_step in enumerate(self.calculation_steps, start=0):
-            calculator.calculation_step = calc_step
-            for (xoff, xsize), (yoff, ysize) in self.partition(i):
-                values = self.source.ReadAsArray(
-                    xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
-                )
-                indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
-                result = calculator(
-                    indices=indices, values=values, no_data_value=no_data_value
-                )
+        for (xoff, xsize), (yoff, ysize) in self.partition():
+            # read
+            values = self.source.ReadAsArray(
+                xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
+            )
 
-                water_depth[i, yoff:yoff + ysize, xoff:xoff + xsize] = result
+            # write
+            indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
+            result = calculator(
+                indices=indices,
+                values=values,
+                no_data_value=no_data_value,
+            )
+
+            # write
+            water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
+
+
+class ProgressClass:
+    """ Progress function and calculation step iterator in one.
+
+    Args:
+        calculation_steps (list(int)): Calculation steps
+        progress_func: a callable.
+
+        The progress_func will be called multiple times with values between 0.0
+        amd 1.0.
+    """
+    def __init__(self, calculation_steps, progress_func):
+        self.progress_func = progress_func
+        self.calculation_steps = calculation_steps
+        self.current = 0
+
+    def __iter__(self):
+        """ Generator of (band_no, calculation_step) """
+        for band_no, calculation_step in enumerate(self.calculation_steps):
+            self.current = band_no
+            yield band_no, calculation_step
+
+    def __call__(self, progress):
+        """ Progress method for the current calculation step. """
+        self.progress_func(
+            (self.current + progress) / len(self.calculation_steps)
+        )
 
 
 calculator_classes = {
@@ -622,27 +641,36 @@ def calculate_waterdepth(
     # TODO remove at some point, newly produced gridadmins don't need it
     fix_gridadmin(gridadmin_path)
 
+    band_count = len(calculation_steps)
+    progress_class = ProgressClass(
+        calculation_steps=calculation_steps, progress_func=progress_func,
+    )
     converter_kwargs = {
         "source_path": dem_path,
         "target_path": waterdepth_path,
-        "progress_func": progress_func,
-        "calculation_steps": calculation_steps,
+        "band_count": band_count,
+        "progress_func": None if progress_func is None else progress_class,
     }
     if netcdf:
         converter_class = NetcdfConverter
         converter_kwargs['gridadmin_path'] = gridadmin_path
         converter_kwargs['results_3di_path'] = results_3di_path
+        converter_kwargs['calculation_steps'] = calculation_steps
     else:
         converter_class = GeoTIFFConverter
 
     with converter_class(**converter_kwargs) as converter:
-
-        calculator_kwargs = {
+        calculator_kwargs_except_step = {
             "gridadmin_path": gridadmin_path,
             "results_3di_path": results_3di_path,
-            "calculation_step": calculation_steps[0],
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
-        with CalculatorClass(**calculator_kwargs) as calculator:
-            converter.convert_using(calculator)
+        for band, calculation_step in progress_class:
+            calculator_kwargs = {
+                "calculation_step": calculation_step,
+                **calculator_kwargs_except_step,
+            }
+
+            with CalculatorClass(**calculator_kwargs) as calculator:
+                converter.convert_using(calculator=calculator, band=band)
