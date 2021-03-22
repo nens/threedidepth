@@ -453,6 +453,7 @@ class NetcdfConverter(GeoTIFFConverter):
     ):
         if netCDF4 is None:
             raise ImportError("Could not import netCDF4")
+        kwargs["band_count"] = len(calculation_steps)
         super().__init__(source_path, target_path, **kwargs)
 
         self.gridadmin_path = gridadmin_path
@@ -581,19 +582,21 @@ class ProgressClass:
         calculation_steps (list(int)): Calculation steps
         progress_func: a callable.
 
-        The progress_func will be called multiple times with values between 0.0
-        amd 1.0.
+    The main purpose is iterating over the calculation steps, but inside the
+    iteration progress_class() can be called values between 0 and 1 to record
+    the partial progress for a calculation step. The supplied `progress_func`
+    will be receive increasing values up to 1 for the complete iteration.
     """
     def __init__(self, calculation_steps, progress_func):
         self.progress_func = progress_func
         self.calculation_steps = calculation_steps
-        self.current = 0
 
     def __iter__(self):
         """ Generator of (band_no, calculation_step) """
         for band_no, calculation_step in enumerate(self.calculation_steps):
             self.current = band_no
             yield band_no, calculation_step
+        del self.current
 
     def __call__(self, progress):
         """ Progress method for the current calculation step. """
@@ -645,14 +648,12 @@ def calculate_waterdepth(
     # TODO remove at some point, newly produced gridadmins don't need it
     fix_gridadmin(gridadmin_path)
 
-    band_count = len(calculation_steps)
     progress_class = ProgressClass(
         calculation_steps=calculation_steps, progress_func=progress_func,
     )
     converter_kwargs = {
         "source_path": dem_path,
         "target_path": waterdepth_path,
-        "band_count": band_count,
         "progress_func": None if progress_func is None else progress_class,
     }
     if netcdf:
@@ -662,6 +663,7 @@ def calculate_waterdepth(
         converter_kwargs['calculation_steps'] = calculation_steps
     else:
         converter_class = GeoTIFFConverter
+        converter_kwargs['band_count'] = len(calculation_steps)
 
     with converter_class(**converter_kwargs) as converter:
         calculator_kwargs_except_step = {
