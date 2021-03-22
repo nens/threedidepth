@@ -562,7 +562,7 @@ class NetcdfConverter(GeoTIFFConverter):
                 xoff=xoff, yoff=yoff, xsize=xsize, ysize=ysize
             )
 
-            # write
+            # calculate
             indices = (yoff, xoff), (yoff + ysize, xoff + xsize)
             result = calculator(
                 indices=indices,
