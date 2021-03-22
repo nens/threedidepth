@@ -115,7 +115,6 @@ def test_progress_class():
 def test_geotiff_converter(source_path, target_path):
     progress_func = mock.Mock()
     band_count = 3
-    band_no = 1
     converter_kwargs = {
         "source_path": source_path,
         "target_path": target_path,
@@ -128,8 +127,17 @@ def test_geotiff_converter(source_path, target_path):
         return values
 
     with GeoTIFFConverter(**converter_kwargs) as converter:
-        converter.convert_using(calculator=calculator, band=band_no)
-        assert len(converter) == len(progress_func.call_args_list)
+        converter.convert_using(calculator=calculator, band=0)
+
+        # check progess func calls
+        progress_func_values = [r[0][0] for r in progress_func.call_args_list]
+        assert len(progress_func_values) == len(converter)
+        assert progress_func_values[0] < 1
+        assert progress_func_values[-1] == 1
+        assert progress_func_values == sorted(progress_func_values)
+
+        # convert another band
+        converter.convert_using(calculator=calculator, band=2)
 
     # check target
     source = gdal.Open(source_path)
@@ -149,14 +157,8 @@ def test_geotiff_converter(source_path, target_path):
     assert all(source_block_size == v for v in target_block_sizes)
     assert all(source_no_data_value == v for v in target_no_data_values)
     assert len(target_array) == band_count
-    assert np.equal(source_array, target_array[band_no]).all()
-    assert np.equal(0, target_array[[0, 2]]).all()
-
-    # check progess func calls
-    progress_func_values = [r[0][0] for r in progress_func.call_args_list]
-    assert progress_func_values[0] < 1
-    assert progress_func_values[-1] == 1
-    assert progress_func_values == sorted(progress_func_values)
+    assert np.equal(source_array, target_array[[0, 2]]).all()
+    assert np.equal(0, target_array[[1]]).all()
 
 
 def test_tiff_converter_existing_target(tmpdir):
@@ -181,7 +183,7 @@ def test_netcdf_converter(source_path, tmp_path, admin):
         "target_path": target_path,
         "gridadmin_path": "dummy",
         "results_3di_path": "dummy",
-        "calculation_steps": [-1],
+        "calculation_steps": [1, -1],
         "progress_func": progress_func,
     }
 
@@ -191,8 +193,9 @@ def test_netcdf_converter(source_path, tmp_path, admin):
 
     with NetcdfConverter(**converter_kwargs) as converter:
         converter.convert_using(calculator, band=0)
+        converter.convert_using(calculator, band=1)
 
-        assert len(converter) == len(progress_func.call_args_list)
+        assert 2 * len(converter) == len(progress_func.call_args_list)
         assert progress_func.call_args_list[0][0][0] < 1
         assert progress_func.call_args_list[-1][0][0] == 1
 
