@@ -583,7 +583,7 @@ class ProgressClass:
         progress_func: a callable.
 
     The main purpose is iterating over the calculation steps, but inside the
-    iteration progress_class() can be called values between 0 and 1 to record
+    iteration progress_class() can be passed values between 0 and 1 to record
     the partial progress for a calculation step. The supplied `progress_func`
     will be receive increasing values up to 1 for the complete iteration.
     """
