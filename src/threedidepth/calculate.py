@@ -470,6 +470,7 @@ class NetcdfConverter(GeoTIFFConverter):
         self._set_lat_lon()
         self._set_time()
         self._set_meta_info()
+        self._create_variable()
 
         return self
 
@@ -539,8 +540,7 @@ class NetcdfConverter(GeoTIFFConverter):
         projection.epsg = self.gridadmin.epsg_code
         projection.long_name = "Spatial Reference"
 
-    def convert_using(self, calculator, band):
-        """Convert data writing it to netcdf4."""
+    def _create_variable(self):
         water_depth = self.target.createVariable(
             "water_depth",
             "f4",
@@ -550,6 +550,9 @@ class NetcdfConverter(GeoTIFFConverter):
         )
         water_depth.long_name = "water depth"
         water_depth.units = "m"
+
+    def convert_using(self, calculator, band):
+        """Convert data writing it to netcdf4."""
 
         no_data_value = self.no_data_value
         for (xoff, xsize), (yoff, ysize) in self.partition():
@@ -567,6 +570,7 @@ class NetcdfConverter(GeoTIFFConverter):
             )
 
             # write
+            water_depth = self.target['water_depth']
             water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
