@@ -5,7 +5,9 @@ Changelog of threedidepth
 0.4 (unreleased)
 ----------------
 
-- Nothing changed yet.
+- Enabled multiple calculation steps.
+
+- Added netCDF output option.
 
 
 0.3 (2021-02-10)
