@@ -2,6 +2,12 @@ Changelog of threedidepth
 =========================
 
 
+0.5 (unreleased)
+----------------
+
+- Nothing changed yet.
+
+
 0.4 (2021-03-23)
 ----------------
 
