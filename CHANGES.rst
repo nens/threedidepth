@@ -2,7 +2,7 @@ Changelog of threedidepth
 =========================
 
 
-0.4 (unreleased)
+0.4 (2021-03-23)
 ----------------
 
 - Enabled multiple calculation steps.
