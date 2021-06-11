@@ -14,11 +14,12 @@ with open('CHANGES.rst') as changes_file:
     changes = changes_file.read()
 
 install_requires = [
-    "threedigrid",
-    # "gdal",  # assumed available via virtualenv --system-site-packages
+    "h5py",
+    "netCDF4",
     "numpy",
     "scipy",
-    "h5py",  # explicit because of the gridadmin fix
+    "threedigrid",
+    # "gdal",  # assumed available via virtualenv --system-site-packages
 ]
 
 tests_require = ["flake8", "pytest", "pytest-cov"]

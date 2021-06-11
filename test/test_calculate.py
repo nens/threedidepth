@@ -96,6 +96,18 @@ def admin():
         yield grid_h5_result_admin
 
 
+@fixture
+def props():
+    import_path = "threedidepth.calculate.get_result_file_properties"
+    with mock.patch(import_path) as props:
+        props.return_value = {
+            "result_type": "raw",
+            "variable": None,
+            "calculation_steps": 3,
+        }
+        yield props
+
+
 def test_progress_class():
     progress_func = mock.Mock()
     calculation_steps = [10, 20]
@@ -207,7 +219,7 @@ def test_netcdf_converter(source_path, tmp_path, admin):
 
 
 def test_calculate_waterdepth_wrong_mode():
-    with raises(ValueError, match="ode"):
+    with raises(ValueError, match="Unknown mode:"):
         calculate_waterdepth(
             gridadmin_path="dummy",
             results_3di_path='dummy',
@@ -217,7 +229,19 @@ def test_calculate_waterdepth_wrong_mode():
         )
 
 
-def test_calculate_waterdepth(source_path, target_path, admin):
+def test_calculate_waterdepth_wrong_step(props):
+    with raises(AssertionError, match="Maximum calculation step is"):
+        calculate_waterdepth(
+            gridadmin_path="dummy",
+            results_3di_path='dummy',
+            dem_path="dummy",
+            waterdepth_path="dummy",
+            calculation_steps=[3],
+            mode=MODE_COPY,
+        )
+
+
+def test_calculate_waterdepth(source_path, target_path, admin, props):
     with mock.patch("threedidepth.calculate.fix_gridadmin"):
         calculate_waterdepth(
             gridadmin_path="dummy",
@@ -321,10 +345,13 @@ def test_calculators(mode, expected, admin):
             mock.Mock(data={"coordinates": coordinates, "s1": s1}),
         ]
 
+    indexes = slice(7, 8)
     calculator_kwargs = {
         "gridadmin_path": "dummy",
+        "result_type": "raw",
         "results_3di_path": "dummy",
-        "calculation_step": -1,
+        "variable": "s1",
+        "calculation_step": indexes.start,
         "dem_shape": nodgrid.shape,
         "dem_geo_transform": geo_transform,
     }
@@ -349,19 +376,19 @@ def test_calculators(mode, expected, admin):
         )
     if mode in (MODE_LINEAR_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "coordinates",
         )
     if mode in (MODE_CONSTANT_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
     if mode in (MODE_LIZARD_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_has_calls(
             [mock.call("s1", "id"), mock.call("s1", "coordinates")]
         )
@@ -391,7 +418,7 @@ def test_depth_calculators(depthmock, mode):
     import_path = "threedidepth.calculate." + BaseClass.__name__ + ".__call__"
     with mock.patch(import_path) as callmock:
         callmock.return_value = 4
-        calculator = CalculatorClass("", "", "", "", "")
+        calculator = CalculatorClass("", "", "", "", "", "", "")
         depth = calculator(1, 2, 3)
 
     callmock.assert_called_once_with(1, 2, 3)
@@ -401,4 +428,4 @@ def test_depth_calculators(depthmock, mode):
 
 def test_calculator_not_implemented():
     with raises(NotImplementedError):
-        BaseCalculator("", "", "", "", "")("", "", "")
+        BaseCalculator("", "", "", "", "", "", "")("", "", "")
