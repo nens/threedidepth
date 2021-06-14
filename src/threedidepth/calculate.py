@@ -31,8 +31,7 @@ class BaseCalculator:
     """Depth calculator using constant waterlevel in a grid cell.
 
     Args:
-        gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
+        result_admin (ResultAdmin): ResultAdmin instance.
         calculation_step (int): Calculation step.
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
@@ -44,19 +43,9 @@ class BaseCalculator:
     DELAUNAY = "delaunay"
 
     def __init__(
-        self,
-        gridadmin_path,
-        result_type,
-        results_3di_path,
-        variable,
-        calculation_step,
-        dem_shape,
-        dem_geo_transform,
+        self, result_admin, calculation_step, dem_shape, dem_geo_transform,
     ):
-        self.gridadmin_path = gridadmin_path
-        self.result_type = result_type
-        self.results_3di_path = results_3di_path
-        self.variable = variable
+        self.ra = result_admin
         self.calculation_step = calculation_step
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
@@ -110,11 +99,11 @@ class BaseCalculator:
         try:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.variable, "id").data
+            data = timeseries.only(self.ra.variable, "id").data
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data[self.variable][0]
+            lookup_s1[data["id"]] = data[self.ra.variable][0]
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
 
@@ -123,11 +112,11 @@ class BaseCalculator:
         try:
             return self.cache[self.INTERPOLATOR]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.variable, "coordinates").data
+            data = timeseries.only(self.ra.variable, "coordinates").data
             points = data["coordinates"].transpose()
-            values = data[self.variable][0]
+            values = data[self.ra.variable][0]
             interpolator = LinearNDInterpolator(
                 points, values, fill_value=NO_DATA_VALUE
             )
@@ -145,11 +134,11 @@ class BaseCalculator:
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.variable, "coordinates").data
+            data = timeseries.only(self.ra.variable, "coordinates").data
             points = data["coordinates"].transpose()
-            s1 = data[self.variable][0]
+            s1 = data[self.ra.variable][0]
 
             # reorder a la lizard
             points, s1 = morton.reorder(points, s1)
@@ -171,7 +160,7 @@ class BaseCalculator:
         i1, i2 = h - i2, h - i1
 
         # note that get_nodgrid() expects a columns-first bbox
-        return self.gr.cells.get_nodgrid(
+        return self.ra.cells.get_nodgrid(
             [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER
         )
 
@@ -187,14 +176,10 @@ class BaseCalculator:
         return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
     def __enter__(self):
-        self.gr = {
-            'raw': GridH5ResultAdmin, 'aggregate': GridH5AggregateResultAdmin,
-        }[self.result_type](self.gridadmin_path, self.results_3di_path)
         self.cache = {}
         return self
 
     def __exit__(self, *args):
-        self.gr = None
         self.cache = None
 
 
@@ -366,7 +351,6 @@ class GeoTIFFConverter:
 
     def __exit__(self, *args):
         """Close datasets.
-
         """
         self.source = None
         self.target = None
@@ -455,25 +439,19 @@ class NetcdfConverter(GeoTIFFConverter):
             self,
             source_path,
             target_path,
-            gridadmin_path,
-            results_3di_path,
+            result_admin,
             calculation_steps,
             **kwargs
     ):
         kwargs["band_count"] = len(calculation_steps)
         super().__init__(source_path, target_path, **kwargs)
 
-        self.gridadmin_path = gridadmin_path
-        self.results_3di_path = results_3di_path
+        self.ra = result_admin
         self.calculation_steps = calculation_steps
 
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
-        self.gridadmin = GridH5ResultAdmin(
-            self.gridadmin_path, self.results_3di_path
-        )
-
         self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
         self._set_lat_lon()
         self._set_time()
@@ -485,26 +463,27 @@ class NetcdfConverter(GeoTIFFConverter):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Close datasets"""
         self.source = None
-        self.gridadmin.close()
         self.target.close()
 
     def _set_meta_info(self):
         """Set meta info in the root group"""
         self.target.Conventions = "CF-1.6"
         self.target.institution = "3Di Waterbeheer"
-        self.target.model_slug = self.gridadmin.model_slug
-        self.target.result_type = "Derived water depth"
+        self.target.model_slug = self.ra.model_slug
+        postfix = {"s1": "", "s1_max": " (using s1_max)"}[self.ra.variable]
+        self.target.result_type = "Derived water depth" + postfix
         self.target.references = "http://3di.nu"
 
     def _set_time(self):
         """Set time"""
+
         self.target.createDimension("time", self.band_count)
         time = self.target.createVariable("time", "f4", ("time",))
-        time[:] = self.gridadmin.nodes.timestamps[self.calculation_steps]
         time.standard_name = "time"
-        time.units = self.gridadmin.time_units.decode("utf-8")
         time.calendar = "standard"
         time.axis = "T"
+        time.units = self.ra.get_time_units()
+        time[:] = self.ra.get_timestamps(self.calculation_steps)
 
     def _set_lat_lon(self):
         geotransform = self.source.GetGeoTransform()
@@ -544,8 +523,8 @@ class NetcdfConverter(GeoTIFFConverter):
         projection = self.target.createVariable(
             "projected_coordinate_system", "i4"
         )
-        projection.EPSG_code = f"EPSG:{self.gridadmin.epsg_code}"
-        projection.epsg = self.gridadmin.epsg_code
+        projection.EPSG_code = f"EPSG:{self.ra.epsg_code}"
+        projection.epsg = self.ra.epsg_code
         projection.long_name = "Spatial Reference"
 
     def _create_variable(self):
@@ -613,6 +592,48 @@ class ProgressClass:
         )
 
 
+class ResultAdmin:
+    """
+    args:
+        gridadmin_path (str): Path to gridadmin.h5 file.
+        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
+
+    Wraps either GridH5ResultAdmin or GridH5AggregateResultAdmin, based on the
+    result type of the file at results_3di_path . Also has custom properties
+    `result_type`, `variable` and `calculation_steps`.
+    """
+
+    def __init__(self, gridadmin_path, results_3di_path):
+        with h5py.File(results_3di_path) as h5:
+            self.result_type = h5.attrs['result_type'].decode('ascii')
+            self.variable = {
+                "raw": "s1", "aggregate": "s1_max",
+            }[self.result_type]
+            self.calculation_steps = len(h5['Mesh1D_' + self.variable])
+
+        result_admin_args = gridadmin_path, results_3di_path
+        if self.result_type == "raw":
+            self._result_admin = GridH5ResultAdmin(*result_admin_args)
+        else:
+            self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
+
+    def get_timestamps(self, calculation_steps):
+        if self.result_type == "raw":
+            return self.nodes.timestamps[calculation_steps]
+        else:
+            return self.nodes.timestamps[self.variable][calculation_steps]
+
+    def get_time_units(self):
+        if self.result_type == "raw":
+            return self.time_units.decode("utf-8")
+        else:
+            nc = self._result_admin.netcdf_file
+            return nc['time_s1_max'].attrs['units'].decode('utf-8')
+
+    def __getattr__(self, name):
+        return getattr(self._result_admin, name)
+
+
 calculator_classes = {
     MODE_COPY: CopyCalculator,
     MODE_NODGRID: NodGridCalculator,
@@ -623,29 +644,6 @@ calculator_classes = {
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
 }
-
-
-def get_result_file_properties(path):
-    """Return dict with selected properties from results file.
-
-    Args:
-        path (str): Path to results NetCDF file.
-
-    The returned dictionary contains:
-        result_type: 'raw' or 'aggregate'
-        variable (str) name of the variable to use for the waterlevel
-        calculation_steps (int): number of steps
-    """
-    with h5py.File(path) as h5:
-        result_type = h5.attrs['result_type'].decode('ascii')
-        variable = {'raw': 's1', 'aggregate': 's1_max'}[result_type]
-        calculation_steps = len(h5['Mesh1D_' + variable])
-
-    return {
-        "result_type": result_type,
-        "variable": variable,
-        "calculation_steps": calculation_steps,
-    }
 
 
 def calculate_waterdepth(
@@ -673,8 +671,12 @@ def calculate_waterdepth(
     except KeyError:
         raise ValueError("Unknown mode: '%s'" % mode)
 
-    result_file_properties = get_result_file_properties(results_3di_path)
-    max_calculation_step = result_file_properties["calculation_steps"] - 1
+    result_admin = ResultAdmin(
+        gridadmin_path=gridadmin_path, results_3di_path=results_3di_path,
+    )
+
+    # handle calculation step
+    max_calculation_step = result_admin.calculation_steps - 1
     if calculation_steps is None:
         calculation_steps = [max_calculation_step]
     else:
@@ -696,8 +698,7 @@ def calculate_waterdepth(
     }
     if netcdf:
         converter_class = NetcdfConverter
-        converter_kwargs['gridadmin_path'] = gridadmin_path
-        converter_kwargs['results_3di_path'] = results_3di_path
+        converter_kwargs['result_admin'] = result_admin
         converter_kwargs['calculation_steps'] = calculation_steps
     else:
         converter_class = GeoTIFFConverter
@@ -705,10 +706,7 @@ def calculate_waterdepth(
 
     with converter_class(**converter_kwargs) as converter:
         calculator_kwargs_except_step = {
-            "gridadmin_path": gridadmin_path,
-            "result_type": result_file_properties['result_type'],
-            "results_3di_path": results_3di_path,
-            "variable": result_file_properties['variable'],
+            "result_admin": result_admin,
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
