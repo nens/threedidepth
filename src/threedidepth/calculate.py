@@ -4,6 +4,7 @@ from itertools import product
 from os import path
 
 from osgeo import gdal
+from osgeo import osr
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import qhull
 import h5py
@@ -453,7 +454,7 @@ class NetcdfConverter(GeoTIFFConverter):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
-        self._set_lat_lon()
+        self._set_coords()
         self._set_time()
         self._set_meta_info()
         self._create_variable()
@@ -485,40 +486,40 @@ class NetcdfConverter(GeoTIFFConverter):
         time.units = self.ra.get_time_units()
         time[:] = self.ra.get_timestamps(self.calculation_steps)
 
-    def _set_lat_lon(self):
+    def _set_coords(self):
         geotransform = self.source.GetGeoTransform()
 
-        self.target.createDimension("lat", self.raster_y_size)
-        latitudes = self.target.createVariable("lat", "f4", ("lat",))
+        self.target.createDimension("y", self.raster_y_size)
+        ycoords = self.target.createVariable("y", "f4", ("y",))
 
         # In CF-1.6 the coordinates are cell centers, while GDAL interprets
         # them as the upper-left corner.
         y_upper_left = geotransform[3] + geotransform[5] / 2
-        latitudes[:] = np.arange(
+        ycoords[:] = np.arange(
             y_upper_left,
             y_upper_left + geotransform[5] * self.raster_y_size,
             geotransform[5]
         )
-        latitudes.standard_name = "latitude"
-        latitudes.long_name = "latitude"
-        latitudes.units = "degrees_north"
-        latitudes.axis = "Y"
+        ycoords.standard_name = "projection_y_coordinate"
+        ycoords.long_name = "y coordinate of projection"
+        ycoords.units = "m"
+        ycoords.axis = "Y"
 
-        self.target.createDimension("lon", self.raster_x_size)
-        longitude = self.target.createVariable("lon", "f4", ("lon",))
+        self.target.createDimension("x", self.raster_x_size)
+        xcoords = self.target.createVariable("x", "f4", ("x",))
 
         # CF 1.6 coordinates are cell center, while GDAL interprets
         # them as the upper-left corner.
         x_upper_left = geotransform[0] + geotransform[1] / 2
-        longitude[:] = np.arange(
+        xcoords[:] = np.arange(
             x_upper_left,
             x_upper_left + geotransform[1] * self.raster_x_size,
             geotransform[1]
         )
-        longitude.standard_name = "longitude"
-        longitude.long_name = "longitude"
-        longitude.units = "degree_east"
-        longitude.axis = "X"
+        xcoords.standard_name = "projection_x_coordinate"
+        xcoords.long_name = "x coordinate of projection"
+        xcoords.units = "m"
+        xcoords.axis = "X"
 
         projection = self.target.createVariable(
             "projected_coordinate_system", "i4"
@@ -526,17 +527,21 @@ class NetcdfConverter(GeoTIFFConverter):
         projection.EPSG_code = f"EPSG:{self.ra.epsg_code}"
         projection.epsg = self.ra.epsg_code
         projection.long_name = "Spatial Reference"
+        projection.spatial_ref = osr.GetUserInputAsWKT(
+            f"EPSG:{self.ra.epsg_code}"
+        )  # for GDAL
 
     def _create_variable(self):
         water_depth = self.target.createVariable(
             "water_depth",
             "f4",
-            ("time", "lat", "lon",),
+            ("time", "y", "x",),
             fill_value=-9999,
             zlib=True
         )
         water_depth.long_name = "water depth"
         water_depth.units = "m"
+        water_depth.grid_mapping = "projected_coordinate_system"
 
     def convert_using(self, calculator, band):
         """Convert data writing it to netcdf4."""
