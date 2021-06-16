@@ -606,16 +606,16 @@ class ResultAdmin:
     def __init__(self, gridadmin_path, results_3di_path):
         with h5py.File(results_3di_path) as h5:
             self.result_type = h5.attrs['result_type'].decode('ascii')
-            self.variable = {
-                "raw": "s1", "aggregate": "s1_max",
-            }[self.result_type]
-            self.calculation_steps = len(h5['Mesh1D_' + self.variable])
 
         result_admin_args = gridadmin_path, results_3di_path
         if self.result_type == "raw":
             self._result_admin = GridH5ResultAdmin(*result_admin_args)
+            self.variable = "s1"
+            self.calculation_steps = self.nodes.timestamps.size
         else:
             self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
+            self.variable = "s1_max"
+            self.calculation_steps = self.nodes.timestamps[self.variable].size
 
     def get_timestamps(self, calculation_steps):
         if self.result_type == "raw":
