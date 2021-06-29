@@ -1,7 +1,9 @@
 threedidepth
 ============
 
-Calculate waterdepths for 3Di results.
+Calculate waterdepths for 3Di results. For results of type 'raw' the variable
+'s1' is used as waterlevel. For results of type 'aggregate', the variable
+'s1_max' is used as waterlevel.
 
 * Interpolated or gridcell-constant waterlevels
 * Interfaces with threediresults via `threedigrid`

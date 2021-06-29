@@ -89,11 +89,11 @@ def source_path(request):
 
 @fixture
 def admin():
-    grid_h5_result_admin = mock.Mock()
-    import_path = "threedidepth.calculate.GridH5ResultAdmin"
-    with mock.patch(import_path) as GridH5ResultAdmin:
-        GridH5ResultAdmin.return_value = grid_h5_result_admin
-        yield grid_h5_result_admin
+    result_admin = mock.Mock()
+    import_path = "threedidepth.calculate.ResultAdmin"
+    with mock.patch(import_path) as ResultAdmin:
+        ResultAdmin.return_value = result_admin
+        yield result_admin
 
 
 def test_progress_class():
@@ -171,18 +171,19 @@ def test_tiff_converter_existing_target(tmpdir):
 
 @mark.parametrize("source_path", [False, True], indirect=True)
 def test_netcdf_converter(source_path, tmp_path, admin):
-    admin.nodes.timestamps = np.arange(10, dtype=np.float32)
-    admin.time_units = b'seconds since 2021-03-02 10:00:00'
+    admin.result_type = "raw"
+    admin.get_timestamps.return_value = np.array([1, -1])
+    admin.get_time_units.return_value = b'seconds since 2021-03-02 10:00:00'
     admin.model_slug = "my_model_slug"
     admin.epsg_code = "28992"
+    admin.variable = "s1"
     target_path = str(tmp_path / "waterdepth.nc")
 
     progress_func = mock.Mock()
     converter_kwargs = {
         "source_path": source_path,
         "target_path": target_path,
-        "gridadmin_path": "dummy",
-        "results_3di_path": "dummy",
+        "result_admin": admin,
         "calculation_steps": [1, -1],
         "progress_func": progress_func,
     }
@@ -207,7 +208,7 @@ def test_netcdf_converter(source_path, tmp_path, admin):
 
 
 def test_calculate_waterdepth_wrong_mode():
-    with raises(ValueError, match="ode"):
+    with raises(ValueError, match="Unknown mode:"):
         calculate_waterdepth(
             gridadmin_path="dummy",
             results_3di_path='dummy',
@@ -217,7 +218,21 @@ def test_calculate_waterdepth_wrong_mode():
         )
 
 
+def test_calculate_waterdepth_wrong_step(admin):
+    admin.calculation_steps = 2
+    with raises(AssertionError, match="Maximum calculation step is"):
+        calculate_waterdepth(
+            gridadmin_path="dummy",
+            results_3di_path='dummy',
+            dem_path="dummy",
+            waterdepth_path="dummy",
+            calculation_steps=[3],
+            mode=MODE_COPY,
+        )
+
+
 def test_calculate_waterdepth(source_path, target_path, admin):
+    admin.calculation_steps = 2
     with mock.patch("threedidepth.calculate.fix_gridadmin"):
         calculate_waterdepth(
             gridadmin_path="dummy",
@@ -309,6 +324,7 @@ def test_calculators(mode, expected, admin):
 
     # prepare gridadmin uses
     admin.cells.get_nodgrid.return_value = nodgrid[tuple(map(slice, *indices))]
+    admin.variable = "s1"
     if mode in (MODE_CONSTANT_S1):
         data = {"id": ids, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
@@ -321,10 +337,10 @@ def test_calculators(mode, expected, admin):
             mock.Mock(data={"coordinates": coordinates, "s1": s1}),
         ]
 
+    indexes = slice(7, 8)
     calculator_kwargs = {
-        "gridadmin_path": "dummy",
-        "results_3di_path": "dummy",
-        "calculation_step": -1,
+        "result_admin": admin,
+        "calculation_step": indexes.start,
         "dem_shape": nodgrid.shape,
         "dem_geo_transform": geo_transform,
     }
@@ -349,19 +365,19 @@ def test_calculators(mode, expected, admin):
         )
     if mode in (MODE_LINEAR_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "coordinates",
         )
     if mode in (MODE_CONSTANT_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
     if mode in (MODE_LIZARD_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=[-1])
+        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_has_calls(
             [mock.call("s1", "id"), mock.call("s1", "coordinates")]
         )
@@ -391,7 +407,7 @@ def test_depth_calculators(depthmock, mode):
     import_path = "threedidepth.calculate." + BaseClass.__name__ + ".__call__"
     with mock.patch(import_path) as callmock:
         callmock.return_value = 4
-        calculator = CalculatorClass("", "", "", "", "")
+        calculator = CalculatorClass("", "", "", "")
         depth = calculator(1, 2, 3)
 
     callmock.assert_called_once_with(1, 2, 3)
@@ -401,4 +417,4 @@ def test_depth_calculators(depthmock, mode):
 
 def test_calculator_not_implemented():
     with raises(NotImplementedError):
-        BaseCalculator("", "", "", "", "")("", "", "")
+        BaseCalculator("", "", "", "")("", "", "")

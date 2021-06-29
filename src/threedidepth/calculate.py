@@ -3,16 +3,15 @@
 from itertools import product
 from os import path
 
-try:
-    import netCDF4
-except ImportError:
-    netCDF4 = None
-import numpy as np
+from osgeo import gdal
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import qhull
+import h5py
+import netCDF4
+import numpy as np
 
-from osgeo import gdal
 from threedigrid.admin.gridresultadmin import GridH5ResultAdmin
+from threedigrid.admin.gridresultadmin import GridH5AggregateResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
@@ -32,8 +31,7 @@ class BaseCalculator:
     """Depth calculator using constant waterlevel in a grid cell.
 
     Args:
-        gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to results_3di.nc file.
+        result_admin (ResultAdmin): ResultAdmin instance.
         calculation_step (int): Calculation step.
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
@@ -45,15 +43,9 @@ class BaseCalculator:
     DELAUNAY = "delaunay"
 
     def __init__(
-        self,
-        gridadmin_path,
-        results_3di_path,
-        calculation_step,
-        dem_shape,
-        dem_geo_transform,
+        self, result_admin, calculation_step, dem_shape, dem_geo_transform,
     ):
-        self.gridadmin_path = gridadmin_path
-        self.results_3di_path = results_3di_path
+        self.ra = result_admin
         self.calculation_step = calculation_step
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
@@ -92,6 +84,10 @@ class BaseCalculator:
         return depth
 
     @property
+    def indexes(self):
+        return slice(self.calculation_step, self.calculation_step + 1)
+
+    @property
     def lookup_s1(self):
         """
         Return the lookup table to find waterlevel by cell id.
@@ -103,11 +99,11 @@ class BaseCalculator:
         try:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=[self.calculation_step])
-            data = timeseries.only("s1", "id").data
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=self.indexes)
+            data = timeseries.only(self.ra.variable, "id").data
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data["s1"][0]
+            lookup_s1[data["id"]] = data[self.ra.variable][0]
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
 
@@ -116,11 +112,11 @@ class BaseCalculator:
         try:
             return self.cache[self.INTERPOLATOR]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=[self.calculation_step])
-            data = timeseries.only("s1", "coordinates").data
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=self.indexes)
+            data = timeseries.only(self.ra.variable, "coordinates").data
             points = data["coordinates"].transpose()
-            values = data["s1"][0]
+            values = data[self.ra.variable][0]
             interpolator = LinearNDInterpolator(
                 points, values, fill_value=NO_DATA_VALUE
             )
@@ -138,11 +134,11 @@ class BaseCalculator:
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
-            nodes = self.gr.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=[self.calculation_step])
-            data = timeseries.only("s1", "coordinates").data
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=self.indexes)
+            data = timeseries.only(self.ra.variable, "coordinates").data
             points = data["coordinates"].transpose()
-            s1 = data["s1"][0]
+            s1 = data[self.ra.variable][0]
 
             # reorder a la lizard
             points, s1 = morton.reorder(points, s1)
@@ -164,7 +160,7 @@ class BaseCalculator:
         i1, i2 = h - i2, h - i1
 
         # note that get_nodgrid() expects a columns-first bbox
-        return self.gr.cells.get_nodgrid(
+        return self.ra.cells.get_nodgrid(
             [j1, i1, j2, i2], subset_name=SUBSET_2D_OPEN_WATER
         )
 
@@ -180,12 +176,10 @@ class BaseCalculator:
         return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
     def __enter__(self):
-        self.gr = GridH5ResultAdmin(self.gridadmin_path, self.results_3di_path)
         self.cache = {}
         return self
 
     def __exit__(self, *args):
-        self.gr = None
         self.cache = None
 
 
@@ -357,7 +351,6 @@ class GeoTIFFConverter:
 
     def __exit__(self, *args):
         """Close datasets.
-
         """
         self.source = None
         self.target = None
@@ -446,27 +439,19 @@ class NetcdfConverter(GeoTIFFConverter):
             self,
             source_path,
             target_path,
-            gridadmin_path,
-            results_3di_path,
+            result_admin,
             calculation_steps,
             **kwargs
     ):
-        if netCDF4 is None:
-            raise ImportError("Could not import netCDF4")
         kwargs["band_count"] = len(calculation_steps)
         super().__init__(source_path, target_path, **kwargs)
 
-        self.gridadmin_path = gridadmin_path
-        self.results_3di_path = results_3di_path
+        self.ra = result_admin
         self.calculation_steps = calculation_steps
 
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
-        self.gridadmin = GridH5ResultAdmin(
-            self.gridadmin_path, self.results_3di_path
-        )
-
         self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
         self._set_lat_lon()
         self._set_time()
@@ -478,26 +463,27 @@ class NetcdfConverter(GeoTIFFConverter):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Close datasets"""
         self.source = None
-        self.gridadmin.close()
         self.target.close()
 
     def _set_meta_info(self):
         """Set meta info in the root group"""
         self.target.Conventions = "CF-1.6"
         self.target.institution = "3Di Waterbeheer"
-        self.target.model_slug = self.gridadmin.model_slug
-        self.target.result_type = "Derived water depth"
+        self.target.model_slug = self.ra.model_slug
+        postfix = {"s1": "", "s1_max": " (using s1_max)"}[self.ra.variable]
+        self.target.result_type = "Derived water depth" + postfix
         self.target.references = "http://3di.nu"
 
     def _set_time(self):
         """Set time"""
+
         self.target.createDimension("time", self.band_count)
         time = self.target.createVariable("time", "f4", ("time",))
-        time[:] = self.gridadmin.nodes.timestamps[self.calculation_steps]
         time.standard_name = "time"
-        time.units = self.gridadmin.time_units.decode("utf-8")
         time.calendar = "standard"
         time.axis = "T"
+        time.units = self.ra.get_time_units()
+        time[:] = self.ra.get_timestamps(self.calculation_steps)
 
     def _set_lat_lon(self):
         geotransform = self.source.GetGeoTransform()
@@ -537,8 +523,8 @@ class NetcdfConverter(GeoTIFFConverter):
         projection = self.target.createVariable(
             "projected_coordinate_system", "i4"
         )
-        projection.EPSG_code = f"EPSG:{self.gridadmin.epsg_code}"
-        projection.epsg = self.gridadmin.epsg_code
+        projection.EPSG_code = f"EPSG:{self.ra.epsg_code}"
+        projection.epsg = self.ra.epsg_code
         projection.long_name = "Spatial Reference"
 
     def _create_variable(self):
@@ -585,7 +571,8 @@ class ProgressClass:
     The main purpose is iterating over the calculation steps, but inside the
     iteration progress_class() can be passed values between 0 and 1 to record
     the partial progress for a calculation step. The supplied `progress_func`
-    will be receive increasing values up to 1 for the complete iteration.
+    will be called with increasing values up to and including 1.0 for the
+    complete iteration.
     """
     def __init__(self, calculation_steps, progress_func):
         self.progress_func = progress_func
@@ -603,6 +590,48 @@ class ProgressClass:
         self.progress_func(
             (self.current + progress) / len(self.calculation_steps)
         )
+
+
+class ResultAdmin:
+    """
+    args:
+        gridadmin_path (str): Path to gridadmin.h5 file.
+        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
+
+    Wraps either GridH5ResultAdmin or GridH5AggregateResultAdmin, based on the
+    result type of the file at results_3di_path . Also has custom properties
+    `result_type`, `variable` and `calculation_steps`.
+    """
+
+    def __init__(self, gridadmin_path, results_3di_path):
+        with h5py.File(results_3di_path) as h5:
+            self.result_type = h5.attrs['result_type'].decode('ascii')
+
+        result_admin_args = gridadmin_path, results_3di_path
+        if self.result_type == "raw":
+            self._result_admin = GridH5ResultAdmin(*result_admin_args)
+            self.variable = "s1"
+            self.calculation_steps = self.nodes.timestamps.size
+        else:
+            self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
+            self.variable = "s1_max"
+            self.calculation_steps = self.nodes.timestamps[self.variable].size
+
+    def get_timestamps(self, calculation_steps):
+        if self.result_type == "raw":
+            return self.nodes.timestamps[calculation_steps]
+        else:
+            return self.nodes.timestamps[self.variable][calculation_steps]
+
+    def get_time_units(self):
+        if self.result_type == "raw":
+            return self.time_units.decode("utf-8")
+        else:
+            nc = self._result_admin.netcdf_file
+            return nc['time_s1_max'].attrs['units'].decode('utf-8')
+
+    def __getattr__(self, name):
+        return getattr(self._result_admin, name)
 
 
 calculator_classes = {
@@ -631,19 +660,30 @@ def calculate_waterdepth(
 
     Args:
         gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to results_3di.nc file.
+        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
         calculation_steps (list(int)): Calculation step (default: [-1] (last))
         mode (str): Interpolation mode.
     """
-    if calculation_steps is None:
-        calculation_steps = [-1]
-
     try:
         CalculatorClass = calculator_classes[mode]
     except KeyError:
         raise ValueError("Unknown mode: '%s'" % mode)
+
+    result_admin = ResultAdmin(
+        gridadmin_path=gridadmin_path, results_3di_path=results_3di_path,
+    )
+
+    # handle calculation step
+    max_calculation_step = result_admin.calculation_steps - 1
+    if calculation_steps is None:
+        calculation_steps = [max_calculation_step]
+    else:
+        assert min(calculation_steps) >= 0
+        assert max(calculation_steps) <= max_calculation_step, (
+            "Maximum calculation step is '%s'." % max_calculation_step
+        )
 
     # TODO remove at some point, newly produced gridadmins don't need it
     fix_gridadmin(gridadmin_path)
@@ -658,8 +698,7 @@ def calculate_waterdepth(
     }
     if netcdf:
         converter_class = NetcdfConverter
-        converter_kwargs['gridadmin_path'] = gridadmin_path
-        converter_kwargs['results_3di_path'] = results_3di_path
+        converter_kwargs['result_admin'] = result_admin
         converter_kwargs['calculation_steps'] = calculation_steps
     else:
         converter_class = GeoTIFFConverter
@@ -667,8 +706,7 @@ def calculate_waterdepth(
 
     with converter_class(**converter_kwargs) as converter:
         calculator_kwargs_except_step = {
-            "gridadmin_path": gridadmin_path,
-            "results_3di_path": results_3di_path,
+            "result_admin": result_admin,
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }

@@ -18,7 +18,7 @@ def test_command(tmpdir):
             results_3di_path="b",
             dem_path="c",
             waterdepth_path="d",
-            calculation_steps=[-1],
+            calculation_steps=None,
             mode=commands.MODE_LIZARD,
             progress_func=None,
             netcdf=False
@@ -31,7 +31,7 @@ def test_command(tmpdir):
             results_3di_path="b",
             dem_path="c",
             waterdepth_path="d",
-            calculation_steps=[-1],
+            calculation_steps=None,
             mode=commands.MODE_CONSTANT,
             progress_func=None,
             netcdf=False

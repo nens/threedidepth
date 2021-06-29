@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.5 (unreleased)
 ----------------
 
-- Nothing changed yet.
+- Added support for result type 'aggregate'.
 
 
 0.4 (2021-03-23)
