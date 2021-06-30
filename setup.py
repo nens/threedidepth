@@ -15,7 +15,7 @@ with open('CHANGES.rst') as changes_file:
 
 install_requires = [
     "h5py",
-    "netCDF4",
+    "h5netcdf",
     "numpy",
     "scipy",
     "threedigrid",

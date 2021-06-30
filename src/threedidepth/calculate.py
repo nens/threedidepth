@@ -7,8 +7,8 @@ from osgeo import gdal
 from osgeo import osr
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import qhull
+import h5netcdf.legacyapi as netCDF4
 import h5py
-import netCDF4
 import numpy as np
 
 from threedigrid.admin.gridresultadmin import GridH5ResultAdmin
@@ -453,7 +453,7 @@ class NetcdfConverter(GeoTIFFConverter):
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
-        self.target = netCDF4.Dataset(self.target_path, "w", format="NETCDF4")
+        self.target = netCDF4.Dataset(self.target_path, "w")
         self._set_coords()
         self._set_time()
         self._set_meta_info()

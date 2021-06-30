@@ -7,6 +7,10 @@ Changelog of threedidepth
 
 - Added support for result type 'aggregate'.
 
+- Got rid of NetCDF4 dependency by using h5netcdf.
+
+- Fix coordinates of NetCDF output. (#17)
+
 
 0.4 (2021-03-23)
 ----------------
