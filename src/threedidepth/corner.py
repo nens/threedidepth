@@ -3,17 +3,6 @@ from itertools import product
 import numpy as np
 from scipy import ndimage
 
-"""
-weights in bilinear interpolation, goes into threedidepth calculators, from
-corners.
-w11 = (x2 - x) * (y2 - y) / (x2 - x1) * (y2 - y1)
-w12 = (x2 - x) * (y - y1) / (x2 - x1) * (y2 - y1)
-w21 = (x - x1) * (y2 - y) / (x2 - x1) * (y2 - y1)
-w22 = (x - x1) * (y - y1) / (x2 - x1) * (y2 - y1)
-
-This goes into the threedepth calculation.
-"""
-
 
 def clock_wise_pairs(array, start=0):
     a, b, c, d = array.transpose()
@@ -64,27 +53,11 @@ class CornerCalculator:
 
     def get_corners(self, values, no_value, linked):
         """
-        nodes: nodgrid
-        no_node: value indicating not in a node
+        Return corner values per node.
+
         values: node values
         no_value: value indicating no value
-        linked: Dict to lookup if
-
-        Nodes: Node ids per intersection
-        No_node: Value in nodes indicating no node.
-
-        Intersections: intersection array
-        Links: lookup dict in the form of {(node1, node2): bool} - lowest node
-               first - time dependent!
-        Values: time dependent node values as usual
-        Possibly: T bar positions already?
-
-        The idea is to merge groups of corners around an intersections if
-        linked
-        crossections exist between them. Then use ndimage.mean to determine the
-        values
-
-        Anything structured per intersection gets an underscore "_" prefix.
+        linked: scipy.sparse.SPMmatrix
         """
         _nodes = self._nodes
         no_node = self._no_node
@@ -149,8 +122,6 @@ class CornerCalculator:
         return result
 
 
-# Here is a test array. It has a number of nodes, our job is to find all nodes
-# corresponding to a corner, up to 4 of them. The cells with 6 are 'no node'.
 nodes = np.array([
     [0, 0],
     [0, 0],
@@ -163,12 +134,20 @@ no_value = 5.
 
 values[no_node] = no_value
 
-linked = AlwaysLinked()  # TODO real links from 3di-results as symmetric scipy.sparse.spmatrix
-
 corner_calculator = CornerCalculator(nodes=nodes, no_node=no_node)
-intersections = corner_calculator._nodes
 corners = corner_calculator.get_corners(
     values=values, no_value=no_value, linked=None
 )
 
-# TODO use corners in  calculator in threedidepth
+# TODO use corners in calculator in threedidepth:
+"""
+weights in bilinear interpolation, goes into threedidepth calculators, from
+corners.
+w11 = (x2 - x) * (y2 - y) / (x2 - x1) * (y2 - y1)
+w12 = (x2 - x) * (y - y1) / (x2 - x1) * (y2 - y1)
+w21 = (x - x1) * (y2 - y) / (x2 - x1) * (y2 - y1)
+w22 = (x - x1) * (y - y1) / (x2 - x1) * (y2 - y1)
+
+This goes into the threedepth calculation.
+"""
+# TODO construct links sparse matrix from results-3di
