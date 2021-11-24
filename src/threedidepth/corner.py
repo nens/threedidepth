@@ -76,11 +76,12 @@ class CornerCalculator:
         _labels[_values == no_value] = no_label
         label_pairs = clock_wise_pairs(_labels)
 
+        # put connected nodes in the same group
         for (n1, n2), (l1, l2) in zip(node_pairs, label_pairs):
             # determine active links with active endpoints
             match = (l1 != no_label) & (l2 != no_label)  # & linked[n1, n2]
             # stop label becomes start label
-            l2[match] = l1[match]
+            # l2[match] = l1[match]
 
         # calculate corner values and make pairs again
         means = ndimage.mean(_values, _labels, range(no_label + 1))

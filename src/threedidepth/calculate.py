@@ -16,6 +16,7 @@ from threedigrid.admin.gridresultadmin import GridH5AggregateResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
+from threedidepth import corner
 from threedidepth import morton
 
 MODE_COPY = "copy"
@@ -112,27 +113,6 @@ class BaseCalculator:
         return lookup_s1
 
     @property
-    def lookup_edges(self):
-        """
-        Return the lookup table to find waterlevel by cell id.
-
-        Both cells outside any defined grid cell and cells in a grid cell that
-        are currently not active ('no data') will return the NO_DATA_VALUE as
-        defined in threedigrid.
-        """
-        try:
-            return self.cache[self.LOOKUP_EDGES]
-        except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            nodes
-            import pdb
-            pdb.set_trace()
-            # TODO edges =
-            lookup_edges = None
-            self.cache[self.LOOKUP_EDGES] = lookup_edges
-        return lookup_edges
-
-    @property
     def interpolator(self):
         try:
             return self.cache[self.INTERPOLATOR]
@@ -179,13 +159,17 @@ class BaseCalculator:
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "coordinates").data
-            points = data["coordinates"].transpose()
+            data = timeseries.only(self.ra.variable, "cell_coords").data
             values = data[self.ra.variable][0]
-            points
-            values
-            # TODO bili =
-            bili = None
+            nodes = self._get_nodgrid(((0, 0), self.dem_shape))
+            # TODO either adjust nodgrid, or edge / value lookups
+            bili = corner.BilinearInterpolator(
+                nodes=nodes,
+                no_node=0,
+                values=values,
+                no_value=NO_DATA_VALUE,
+                edges=data["cell_coords"],
+            )
             self.cache[self.BILI] = bili
             return bili
 
@@ -313,7 +297,7 @@ class LizardLevelCalculator(BaseCalculator):
         return level.reshape(values.shape)
 
 
-class BiLinearLevelCalculator(BaseCalculator):
+class BilinearLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         points = self._get_points(indices)
@@ -694,6 +678,7 @@ calculator_classes = {
     MODE_CONSTANT_S1: ConstantLevelCalculator,
     MODE_LINEAR_S1: LinearLevelCalculator,
     MODE_LIZARD_S1: LizardLevelCalculator,
+    MODE_BILINEAR_S1: BilinearLevelCalculator,
     MODE_CONSTANT: ConstantLevelDepthCalculator,
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
