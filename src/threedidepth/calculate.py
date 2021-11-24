@@ -23,6 +23,7 @@ MODE_NODGRID = "nodgrid"
 MODE_CONSTANT_S1 = "constant-s1"
 MODE_LINEAR_S1 = "linear-s1"
 MODE_LIZARD_S1 = "lizard-s1"
+MODE_BILINEAR_S1 = "bilinear-s1"
 MODE_CONSTANT = "constant"
 MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
@@ -40,8 +41,10 @@ class BaseCalculator:
 
     PIXEL_MAP = "pixel_map"
     LOOKUP_S1 = "lookup_s1"
+    LOOKUP_EDGES = "lookup_edges"
     INTERPOLATOR = "interpolator"
     DELAUNAY = "delaunay"
+    BILI = "bili"
 
     def __init__(
         self, result_admin, calculation_step, dem_shape, dem_geo_transform,
@@ -109,6 +112,27 @@ class BaseCalculator:
         return lookup_s1
 
     @property
+    def lookup_edges(self):
+        """
+        Return the lookup table to find waterlevel by cell id.
+
+        Both cells outside any defined grid cell and cells in a grid cell that
+        are currently not active ('no data') will return the NO_DATA_VALUE as
+        defined in threedigrid.
+        """
+        try:
+            return self.cache[self.LOOKUP_EDGES]
+        except KeyError:
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+            nodes
+            import pdb
+            pdb.set_trace()
+            # TODO edges =
+            lookup_edges = None
+            self.cache[self.LOOKUP_EDGES] = lookup_edges
+        return lookup_edges
+
+    @property
     def interpolator(self):
         try:
             return self.cache[self.INTERPOLATOR]
@@ -147,6 +171,23 @@ class BaseCalculator:
             delaunay = qhull.Delaunay(points)
             self.cache[self.DELAUNAY] = delaunay, s1
             return delaunay, s1
+
+    @property
+    def bili(self):
+        try:
+            return self.cache[self.BILI]
+        except KeyError:
+            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = nodes.timeseries(indexes=self.indexes)
+            data = timeseries.only(self.ra.variable, "coordinates").data
+            points = data["coordinates"].transpose()
+            values = data[self.ra.variable][0]
+            points
+            values
+            # TODO bili =
+            bili = None
+            self.cache[self.BILI] = bili
+            return bili
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -270,6 +311,14 @@ class LizardLevelCalculator(BaseCalculator):
         in_interpol_and_suitable[in_interpol] &= suitable
         level[in_interpol_and_suitable] = np.sum(weight * nodelevel, axis=1)
         return level.reshape(values.shape)
+
+
+class BiLinearLevelCalculator(BaseCalculator):
+    def __call__(self, indices, values, no_data_value):
+        """Return waterlevel array."""
+        points = self._get_points(indices)
+        nodes = self._get_nodgrid(indices)
+        return self.bili(points=points, nodes=nodes).reshape(values.shape)
 
 
 class ConstantLevelDepthCalculator(ConstantLevelCalculator):

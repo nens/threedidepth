@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from itertools import product
 
 import numpy as np
@@ -8,11 +9,6 @@ def clock_wise_pairs(array, start=0):
     a, b, c, d = array.transpose()
     pairs = (a, b), (b, d), (d, c), (c, a)
     return tuple(pairs[(i + start) % 4] for i in range(4))
-
-
-class AlwaysLinked:
-    def __getitem__(self, key):
-        return True
 
 
 class CornerCalculator:
@@ -122,32 +118,30 @@ class CornerCalculator:
         return result
 
 
-nodes = np.array([
-    [0, 0],
-    [0, 0],
-    [1, 2],
-    [3, 4],
-])
-no_node = 5
-values = np.array([0, 1, 2, 3, 4, 5], dtype='f4')
-no_value = 5.
+class BililinarInterpolator:
+    """
+    nodes: the full nodgrie
+    no_node: Value in the nodgrid indicating no value
+    values: values per node
+    no_value: value indicating no value
+    edges; per node edges, x1, y1, x2, y2
+    """
+    def __init__(self, nodes, no_node, values, no_value, edges):
+        self.corners = CornerCalculator(
+            nodes=nodes, no_node=no_node,
+        ).get_corners(
+            values=values, no_value=no_value, linked=None,
+        )
+        self.edges = edges
 
-values[no_node] = no_value
-
-corner_calculator = CornerCalculator(nodes=nodes, no_node=no_node)
-corners = corner_calculator.get_corners(
-    values=values, no_value=no_value, linked=None
-)
-
-# TODO use corners in calculator in threedidepth:
-"""
-weights in bilinear interpolation, goes into threedidepth calculators, from
-corners.
-w11 = (x2 - x) * (y2 - y) / (x2 - x1) * (y2 - y1)
-w12 = (x2 - x) * (y - y1) / (x2 - x1) * (y2 - y1)
-w21 = (x - x1) * (y2 - y) / (x2 - x1) * (y2 - y1)
-w22 = (x - x1) * (y - y1) / (x2 - x1) * (y2 - y1)
-
-This goes into the threedepth calculation.
-"""
-# TODO construct links sparse matrix from results-3di
+    def __call__(self, nodes, points):
+        """ local nodes and points """
+        c11, c12, c21, c22 = self.corners[nodes]
+        x1, y1, x2, y2 = self.edges[nodes].tranpose()
+        x, y = points
+        return np.sum(
+            c11 * (x2 - x) * (y2 - y) / (x2 - x1) * (y2 - y1),
+            c12 * (x2 - x) * (y - y1) / (x2 - x1) * (y2 - y1),
+            c21 * (x - x1) * (y2 - y) / (x2 - x1) * (y2 - y1),
+            c22 * (x - x1) * (y - y1) / (x2 - x1) * (y2 - y1),
+        )
