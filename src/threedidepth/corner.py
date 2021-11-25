@@ -5,10 +5,12 @@ import numpy as np
 from scipy import ndimage
 
 
-def clock_wise_pairs(array, start=0):
-    a, b, c, d = array.transpose()
-    pairs = (a, b), (b, d), (d, c), (c, a)
-    return tuple(pairs[(i + start) % 4] for i in range(4))
+class Pairs:
+    def __init__(self, array):
+        a, b, c, d = array.transpose()
+        self.cw = (a, b), (b, d), (d, c), (c, a)
+        self.op = (d, c), (c, a), (a, b), (b, d)
+        self.d3 = (a, b), (b, d), (d, c), (a, c), (c, d), (d, b)
 
 
 class CornerCalculator:
@@ -62,26 +64,25 @@ class CornerCalculator:
         _values = values[_nodes]
 
         # make pairs of nodes that go around an intersection, order matters!
-        node_pairs = clock_wise_pairs(_nodes)
+        _nodes_p = Pairs(_nodes)
 
-        # determine T-bar intersections per pair and overall
+        # determine T-bar intersections per pair
         bar = np.zeros(_nodes.shape[::-1], dtype=bool)
-        for i, (n1, n2) in enumerate(node_pairs):
+        for i, (n1, n2) in enumerate(_nodes_p.cw):
             bar[i] = (n1 == n2) & (n1 != no_node)
-        # bar = is_bar_pair.any(axis=0)
 
         # give every active corner a unique label, and make pairs too
         no_label = _nodes.size
         _labels = np.arange(no_label).reshape(_nodes.shape)
         _labels[_values == no_value] = no_label
-        label_pairs = clock_wise_pairs(_labels)
+        _labels_p = Pairs(_labels)
 
         # put connected nodes in the same group
-        for (n1, n2), (l1, l2) in zip(node_pairs, label_pairs):
+        for (n1, n2), (l1, l2) in zip(_nodes_p.d3, _labels_p.d3):
             # determine active links with active endpoints
             match = (l1 != no_label) & (l2 != no_label)  # & linked[n1, n2]
             # stop label becomes start label
-            # l2[match] = l1[match]
+            l2[match] = l1[match]
 
         # calculate corner values and make pairs again
         means = ndimage.mean(_values, _labels, range(no_label + 1))
@@ -96,30 +97,36 @@ class CornerCalculator:
         result[i, j] = _corners[nobar].ravel()
 
         # make corner pairs that start on opposite side of intersection
-        result_pairs = clock_wise_pairs(_corners, start=2)
+        result_p = Pairs(result)
 
         # groups containing a T-bar get the mean of the adjacent corners
-        all_pairs = zip(bar, label_pairs, node_pairs, result_pairs)
+        all_pairs = zip(bar, _labels_p.cw, _nodes_p.cw, result_p.op)
         for b, (l1, l2), (n1, n2), (r3, r4) in all_pairs:
-            # adjust the mean
+            # adjust the mean TODO somehow wrong mean gets calculated. earlier
+            # we used _corners instead of results, but how would that be
+            # correct?
             means[l1[b]] = 0.5 * (r3[n1[b]] + r4[n2[b]])
             # deactivate the labels
             l1[b] = no_label
             l2[b] = no_label
 
-        # denormalize the corners per node into the result, but make
-        # sure not to overwrite the already written 'no T-bar' intersections,
-        # since those have already been written before
-        result = np.full((values.size, 4), no_value)
+        # denormalize the corners per node into the result, but make sure not
+        # to overwrite the already written 'no T-bar' intersections, since
+        # those have already been written before 
+        result = np.full((values.size, 4), no_value)  #  TODO nice to have would be to
+        # only write the T-bar intersections, and only the active labels in
+        # them we don't have to recreate the result array then
         active = (_labels != no_label)
         i = _nodes[active]           # node index
         j = 3 - active.nonzero()[1]  # corner index, opposite to intersection
         result[i, j] = _corners[active]
 
+        import pdb
+        pdb.set_trace() 
         return result
 
 
-class BililinarInterpolator:
+class BilinearInterpolator:
     """
     nodes: the full nodgrie
     no_node: Value in the nodgrid indicating no value
@@ -137,12 +144,13 @@ class BililinarInterpolator:
 
     def __call__(self, nodes, points):
         """ local nodes and points """
-        c11, c12, c21, c22 = self.corners[nodes]
-        x1, y1, x2, y2 = self.edges[nodes].tranpose()
-        x, y = points
-        return np.sum(
-            c11 * (x2 - x) * (y2 - y) / (x2 - x1) * (y2 - y1),
-            c12 * (x2 - x) * (y - y1) / (x2 - x1) * (y2 - y1),
-            c21 * (x - x1) * (y2 - y) / (x2 - x1) * (y2 - y1),
-            c22 * (x - x1) * (y - y1) / (x2 - x1) * (y2 - y1),
-        )
+        c12, c22, c11, c21 = self.corners[nodes].transpose()
+        x1, y1, x2, y2 = self.edges[:, nodes]
+        x, y = points.transpose()
+        result = np.sum([
+            c11 * (x2 - x) * (y2 - y) / (x2 - x1) / (y2 - y1),
+            c12 * (x2 - x) * (y - y1) / (x2 - x1) / (y2 - y1),
+            c21 * (x - x1) * (y2 - y) / (x2 - x1) / (y2 - y1),
+            c22 * (x - x1) * (y - y1) / (x2 - x1) / (y2 - y1),
+        ], axis=0)
+        return result

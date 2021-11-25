@@ -159,16 +159,24 @@ class BaseCalculator:
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "cell_coords").data
-            values = data[self.ra.variable][0]
-            nodes = self._get_nodgrid(((0, 0), self.dem_shape))
-            # TODO either adjust nodgrid, or edge / value lookups
+            data = timeseries.only(self.ra.variable, "id", "cell_coords").data
+
+            # edges need to be reordered
+            edges = np.array([
+                [0.], [0.], [1.], [1.]
+            ]).repeat(data["id"].max() + 1, axis=1)
+            edges[:, data["id"]] = data["cell_coords"]
+
+            # values need to be reordered
+            values = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
+            values[data["id"]] = data[self.ra.variable][0]
+
             bili = corner.BilinearInterpolator(
-                nodes=nodes,
+                nodes=self._get_nodgrid(((0, 0), self.dem_shape)),
                 no_node=0,
                 values=values,
                 no_value=NO_DATA_VALUE,
-                edges=data["cell_coords"],
+                edges=edges,
             )
             self.cache[self.BILI] = bili
             return bili
@@ -301,7 +309,7 @@ class BilinearLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         points = self._get_points(indices)
-        nodes = self._get_nodgrid(indices)
+        nodes = self._get_nodgrid(indices).ravel()
         return self.bili(points=points, nodes=nodes).reshape(values.shape)
 
 
