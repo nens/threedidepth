@@ -28,6 +28,7 @@ MODE_BILINEAR_S1 = "bilinear-s1"
 MODE_CONSTANT = "constant"
 MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
+MODE_BILINEAR = "bilinear"
 
 
 class BaseCalculator:
@@ -332,6 +333,15 @@ class LinearLevelDepthCalculator(LinearLevelCalculator):
 
 
 class LizardLevelDepthCalculator(LizardLevelCalculator):
+    def __call__(self, indices, values, no_data_value):
+        """Return waterdepth array."""
+        waterlevel = super().__call__(indices, values, no_data_value)
+        return self._depth_from_water_level(
+            dem=values, fillvalue=no_data_value, waterlevel=waterlevel
+        )
+
+
+class BilinearLevelDepthCalculator(BilinearLevelCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterdepth array."""
         waterlevel = super().__call__(indices, values, no_data_value)
@@ -690,6 +700,7 @@ calculator_classes = {
     MODE_CONSTANT: ConstantLevelDepthCalculator,
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
+    MODE_BILINEAR: BilinearLevelDepthCalculator,
 }
 
 
