@@ -13,6 +13,16 @@ class Pairs:
         self.d3 = (a, b), (b, d), (d, c), (a, c), (c, d), (d, b)
 
 
+class Linked(set):
+    def _single(self, a, b):
+        """ Return if a, b in self. """
+        return np.array([x in self for x in zip(a, b)])
+
+    def __getitem__(self, index):
+        a, b = index
+        return self._single(a, b) | self._single(b, a)
+
+
 class CornerCalculator:
     def __init__(self, nodes, no_node):
         """
@@ -55,12 +65,13 @@ class CornerCalculator:
 
         values: node values
         no_value: value indicating no value
-        linked: scipy.sparse.SPMmatrix
+        linked: something that checks if nodes are linked...
         """
         _nodes = self._nodes
         no_node = self._no_node
         assert values[no_node] == no_value
 
+        # values[1:] = np.log10(np.arange(1, values.size))  # for debugging
         _values = values[_nodes]
 
         # make pairs of nodes that go around an intersection, order matters!
@@ -80,13 +91,15 @@ class CornerCalculator:
         # put connected nodes in the same group
         for (n1, n2), (l1, l2) in zip(_nodes_p.d3, _labels_p.d3):
             # determine active links with active endpoints
-            match = (l1 != no_label) & (l2 != no_label)  # & linked[n1, n2]
+            match = (
+                (l1 != no_label) & (l2 != no_label)
+                # & ((n1 == n2) | ~linked[n1, n2])
+            )
             # stop label becomes start label
             l2[match] = l1[match]
 
-        # calculate corner values and make pairs again
+        # calculate corner values
         means = ndimage.mean(_values, _labels, range(no_label + 1))
-        assert means[no_label] == no_value
         _corners = means[_labels]
 
         # create result, but write only corners from 'no T-bar' intersections
@@ -96,34 +109,32 @@ class CornerCalculator:
         j = 3 - np.arange(4 * nobar.sum()) % 4
         result[i, j] = _corners[nobar].ravel()
 
-        # make corner pairs that start on opposite side of intersection
-        result_p = Pairs(result)
-
         # groups containing a T-bar get the mean of the adjacent corners
+        result_p = Pairs(result)
         all_pairs = zip(bar, _labels_p.cw, _nodes_p.cw, result_p.op)
         for b, (l1, l2), (n1, n2), (r3, r4) in all_pairs:
-            # adjust the mean TODO somehow wrong mean gets calculated. earlier
-            # we used _corners instead of results, but how would that be
-            # correct?
             means[l1[b]] = 0.5 * (r3[n1[b]] + r4[n2[b]])
-            # deactivate the labels
+            # deactivate the labels, so that they do not overwrite results
             l1[b] = no_label
             l2[b] = no_label
 
-        # denormalize the corners per node into the result, but make sure not
-        # to overwrite the already written 'no T-bar' intersections, since
-        # those have already been written before 
-        result = np.full((values.size, 4), no_value)  #  TODO nice to have would be to
-        # only write the T-bar intersections, and only the active labels in
-        # them we don't have to recreate the result array then
+        # write the corners again, now with correct 'T-bar' intersections
+        _corners = means[_labels]
+
+        # write result for all active corners
         active = (_labels != no_label)
         i = _nodes[active]           # node index
         j = 3 - active.nonzero()[1]  # corner index, opposite to intersection
         result[i, j] = _corners[active]
 
-        import pdb
-        pdb.set_trace() 
         return result
+
+
+LINKED = Linked()
+LINKED.add((296, 827))
+LINKED.add((304, 834))
+LINKED.add((304, 842))
+LINKED.add((316, 315))
 
 
 class BilinearInterpolator:
@@ -138,7 +149,7 @@ class BilinearInterpolator:
         self.corners = CornerCalculator(
             nodes=nodes, no_node=no_node,
         ).get_corners(
-            values=values, no_value=no_value, linked=None,
+            values=values, no_value=no_value, linked=LINKED,
         )
         self.edges = edges
 
