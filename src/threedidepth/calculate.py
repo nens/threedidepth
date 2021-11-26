@@ -158,6 +158,7 @@ class BaseCalculator:
         try:
             return self.cache[self.BILI]
         except KeyError:
+            # determine values and edges
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             timeseries = nodes.timeseries(indexes=self.indexes)
             data = timeseries.only(self.ra.variable, "id", "cell_coords").data
@@ -172,12 +173,22 @@ class BaseCalculator:
             values = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
             values[data["id"]] = data[self.ra.variable][0]
 
+            # determine links
+            lines = self.ra.lines.subset(SUBSET_2D_OPEN_WATER)
+            timeseries = lines.timeseries(indexes=self.indexes)
+            data = timeseries.only("line", "au").data
+            line = data["line"]
+            au = data["au"]
+            linked = corner.Linked(lines=line[:, au[0] > 1e-7])
+
+            # construct the interpolator
             bili = corner.BilinearInterpolator(
                 nodes=self._get_nodgrid(((0, 0), self.dem_shape)),
                 no_node=0,
                 values=values,
                 no_value=NO_DATA_VALUE,
                 edges=edges,
+                linked=linked,
             )
             self.cache[self.BILI] = bili
             return bili

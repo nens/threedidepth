@@ -6,21 +6,34 @@ from scipy import ndimage
 
 
 class Pairs:
+    """
+    Group pairs of cells.
+    """
     def __init__(self, array):
         a, b, c, d = array.transpose()
+        # clockwise pairs, starting at the top
         self.cw = (a, b), (b, d), (d, c), (c, a)
+        # clockwise pairs, starting at the bottom, "opposite"
         self.op = (d, c), (c, a), (a, b), (b, d)
+        # 3 pairs cw, starting at top, then 3 pairs ccw, start left, "double 3"
         self.d3 = (a, b), (b, d), (d, c), (a, c), (c, d), (d, b)
 
 
-class Linked(set):
-    def _single(self, a, b):
-        """ Return if a, b in self. """
-        return np.array([x in self for x in zip(a, b)])
+class Linked:
+    def __init__(self, lines):
+        self.links = np.empty((len(lines[0]), 2), dtype="i8")
+        self.view = self.links.view("i8, i8")
+        self.links[:] = lines.transpose()
 
     def __getitem__(self, index):
         a, b = index
-        return self._single(a, b) | self._single(b, a)
+        array = np.empty((len(a), 2), dtype="i8")
+        view = array.view("i8, i8").ravel()
+        array[:, 0], array[:, 1] = a, b
+        result = np.isin(view, self.view)
+        array[:, 0], array[:, 1] = b, a
+        result |= np.isin(view, self.view)
+        return result
 
 
 class CornerCalculator:
@@ -92,14 +105,17 @@ class CornerCalculator:
         for (n1, n2), (l1, l2) in zip(_nodes_p.d3, _labels_p.d3):
             # determine active links with active endpoints
             match = (
-                (l1 != no_label) & (l2 != no_label)
-                # & ((n1 == n2) | ~linked[n1, n2])
+                (l1 != no_label) &
+                (l2 != no_label) &
+                ((n1 == n2) | linked[n1, n2])
             )
             # stop label becomes start label
             l2[match] = l1[match]
 
         # calculate corner values
-        means = ndimage.mean(_values, _labels, range(no_label + 1))
+        index = np.unique(_labels)
+        means = np.full(no_label + 1, no_value)
+        means[index] = ndimage.mean(_values, _labels, index)
         _corners = means[_labels]
 
         # create result, but write only corners from 'no T-bar' intersections
@@ -130,13 +146,6 @@ class CornerCalculator:
         return result
 
 
-LINKED = Linked()
-LINKED.add((296, 827))
-LINKED.add((304, 834))
-LINKED.add((304, 842))
-LINKED.add((316, 315))
-
-
 class BilinearInterpolator:
     """
     nodes: the full nodgrie
@@ -145,11 +154,11 @@ class BilinearInterpolator:
     no_value: value indicating no value
     edges; per node edges, x1, y1, x2, y2
     """
-    def __init__(self, nodes, no_node, values, no_value, edges):
+    def __init__(self, nodes, no_node, values, no_value, edges, linked):
         self.corners = CornerCalculator(
             nodes=nodes, no_node=no_node,
         ).get_corners(
-            values=values, no_value=no_value, linked=LINKED,
+            values=values, no_value=no_value, linked=linked,
         )
         self.edges = edges
 
