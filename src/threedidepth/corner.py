@@ -182,41 +182,30 @@ class BilinearInterpolator:
 
 # TODO more tests in a separate test module
 NODES = np.array([
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
+    [0, 1, 4, 4],
+    [2, 3, 4, 4],
 ])
-NO_NODE = 9
+NO_NODE = 0
+VALUES = np.arange(5.)
+NO_VALUE = 9.
+VALUES[NO_NODE] = NO_VALUE
+LINES = np.array([
+    [1, 2],
+    # [1, 4],
+    [2, 3],
+    [3, 4],
+    [1, 3],
+]).transpose()
 
 
-def test_disconnected():
+def test():
     calculator = CornerCalculator(nodes=NODES, no_node=NO_NODE)
-    values = np.arange(10.)
-    no_value = 9.
-    values[9] = no_value
-    linked = Linked()
+    print(calculator._nodes.reshape(-1, 2, 2))
 
     corners = calculator.get_corners(
-        values=values, no_value=no_value, linked=linked,
+        values=VALUES, no_value=NO_VALUE, linked=Linked(LINES)
     )
-    print(corners)
+    print(corners.reshape(-1, 2, 2))
 
 
-def test_something():
-    nodes = np.array([
-        [0, 0],
-        [0, 0],
-        [1, 2],
-        [3, 4],
-    ])
-    no_node = 5
-    values = np.array([0, 1, 2, 3, 4, 5], dtype='f4')
-    no_value = 5.
-
-    values[no_node] = no_value
-
-    corner_calculator = CornerCalculator(nodes=nodes, no_node=no_node)
-    corners = corner_calculator.get_corners(
-        values=values, no_value=no_value, linked=None
-    )
-    print(corners)
+# test()
