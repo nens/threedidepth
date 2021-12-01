@@ -8,6 +8,10 @@ from scipy import ndimage
 class Pairs:
     """
     Group pairs of cells.
+
+    TODO this naming may be a bit obscure. See if we can make separate
+    functions for it. Or a generic function accepting defined constant
+    parameters on the CornerCalculator.
     """
     def __init__(self, array):
         a, b, c, d = array.transpose()
@@ -174,3 +178,45 @@ class BilinearInterpolator:
             c22 * (x - x1) * (y - y1) / (x2 - x1) / (y2 - y1),
         ], axis=0)
         return result
+
+
+# TODO more tests in a separate test module
+NODES = np.array([
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+])
+NO_NODE = 9
+
+
+def test_disconnected():
+    calculator = CornerCalculator(nodes=NODES, no_node=NO_NODE)
+    values = np.arange(10.)
+    no_value = 9.
+    values[9] = no_value
+    linked = Linked()
+
+    corners = calculator.get_corners(
+        values=values, no_value=no_value, linked=linked,
+    )
+    print(corners)
+
+
+def test_something():
+    nodes = np.array([
+        [0, 0],
+        [0, 0],
+        [1, 2],
+        [3, 4],
+    ])
+    no_node = 5
+    values = np.array([0, 1, 2, 3, 4, 5], dtype='f4')
+    no_value = 5.
+
+    values[no_node] = no_value
+
+    corner_calculator = CornerCalculator(nodes=nodes, no_node=no_node)
+    corners = corner_calculator.get_corners(
+        values=values, no_value=no_value, linked=None
+    )
+    print(corners)
