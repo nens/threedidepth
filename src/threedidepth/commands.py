@@ -1,13 +1,32 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import collections
 import sys
 
 from osgeo import gdal
 
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import MODE_LIZARD
+from threedidepth.calculate import MODE_LIZARD_S1
 from threedidepth.calculate import MODE_CONSTANT
+from threedidepth.calculate import MODE_CONSTANT_S1
+from threedidepth.calculate import MODE_BILINEAR
+from threedidepth.calculate import MODE_BILINEAR_S1
+
+
+Choice = collections.namedtuple("Choice", ["c", "w", "b"])
+
+MODE = {
+    Choice(b=False, c=False, w=False): MODE_LIZARD,
+    Choice(b=False, c=False, w=True): MODE_LIZARD_S1,
+    Choice(b=False, c=True, w=False): MODE_CONSTANT,
+    Choice(b=False, c=True, w=True): MODE_CONSTANT_S1,
+    Choice(b=True, c=False, w=False): MODE_BILINEAR,
+    Choice(b=True, c=False, w=True): MODE_BILINEAR_S1,
+    Choice(b=True, c=True, w=False): MODE_CONSTANT,
+    Choice(b=True, c=True, w=True): MODE_CONSTANT_S1,
+}
 
 
 def threedidepth(*args):
@@ -43,6 +62,25 @@ def threedidepth(*args):
         help="disable interpolation and use constant waterlevel per grid cell",
     )
     parser.add_argument(
+        "-w",
+        "--waterlevel",
+        action="store_true",
+        help="export the waterlevel instead of the waterdepth"
+    )
+    parser.add_argument(
+        "-b",
+        "--bilinear",
+        action="store_true",
+        help="When using interplation, use the bilinear method."
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=int,
+        dest="threshold",
+        help="exponent of 10 for the au threhsold; e.g. '-4' gives 1e-4.",
+    )
+    parser.add_argument(
         "-p",
         "--progress",
         action="store_const",
@@ -57,10 +95,13 @@ def threedidepth(*args):
         help="export the waterdepth as a netcdf"
     )
     kwargs = vars(parser.parse_args())
-    if kwargs.pop("constant"):
-        kwargs["mode"] = MODE_CONSTANT
-    else:
-        kwargs["mode"] = MODE_LIZARD
+
+    kwargs["threshold"] = float('1e' + str(-7))
+    kwargs["mode"] = MODE[Choice(
+        b=kwargs.pop("bilinear"),
+        c=kwargs.pop("constant"),
+        w=kwargs.pop("waterlevel"),
+    )]
     calculate_waterdepth(**kwargs)
 
 

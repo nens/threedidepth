@@ -179,7 +179,7 @@ class BaseCalculator:
             data = timeseries.only("line", "au").data
             line = data["line"]
             au = data["au"]
-            linked = corner.Linked(lines=line[:, au[0] > 1e-7])
+            linked = corner.Linked(lines=line[:, au[0] > self.threshold])
 
             # construct the interpolator
             bili = corner.BilinearInterpolator(
@@ -318,6 +318,10 @@ class LizardLevelCalculator(BaseCalculator):
 
 
 class BilinearLevelCalculator(BaseCalculator):
+    def __init__(self, **kwargs):
+        self.threshold = self.kwargs.pop('threshold', default=1e-7)
+        super().__init__(**kwargs)
+
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
         points = self._get_points(indices)
