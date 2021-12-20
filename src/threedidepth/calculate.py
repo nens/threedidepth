@@ -99,7 +99,7 @@ class BaseCalculator:
         Return the lookup table to find waterlevel by cell id.
 
         Both cells outside any defined grid cell and cells in a grid cell that
-        are currently not active ('no data') will return the NO_DATA_VALUE as
+        are currently not active ("no data") will return the NO_DATA_VALUE as
         defined in threedigrid.
         """
         try:
@@ -265,7 +265,7 @@ class LizardLevelCalculator(BaseCalculator):
         all of the following requirements are met:
         - The point is inside a grid cell
         - The point is inside the triangulation
-        - The sum of weights of active (not 'no data' nodes) is more than half
+        - The sum of weights of active (not "no data" nodes) is more than half
           of the total weight of all nodes. Only active nodes are included in
           the interpolation.
 
@@ -319,7 +319,7 @@ class LizardLevelCalculator(BaseCalculator):
 
 class BilinearLevelCalculator(BaseCalculator):
     def __init__(self, **kwargs):
-        self.threshold = self.kwargs.pop('threshold', default=1e-7)
+        self.threshold = kwargs.pop("threshold")
         super().__init__(**kwargs)
 
     def __call__(self, indices, values, no_data_value):
@@ -628,7 +628,7 @@ class NetcdfConverter(GeoTIFFConverter):
             )
 
             # write
-            water_depth = self.target['water_depth']
+            water_depth = self.target["water_depth"]
             water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
@@ -676,7 +676,7 @@ class ResultAdmin:
 
     def __init__(self, gridadmin_path, results_3di_path):
         with h5py.File(results_3di_path) as h5:
-            self.result_type = h5.attrs['result_type'].decode('ascii')
+            self.result_type = h5.attrs["result_type"].decode("ascii")
 
         result_admin_args = gridadmin_path, results_3di_path
         if self.result_type == "raw":
@@ -699,7 +699,7 @@ class ResultAdmin:
             return self.time_units.decode("utf-8")
         else:
             nc = self._result_admin.netcdf_file
-            return nc['time_s1_max'].attrs['units'].decode('utf-8')
+            return nc["time_s1_max"].attrs["units"].decode("utf-8")
 
     def __getattr__(self, name):
         return getattr(self._result_admin, name)
@@ -728,6 +728,7 @@ def calculate_waterdepth(
     mode=MODE_LIZARD,
     progress_func=None,
     netcdf=False,
+    threshold=None,
 ):
     """Calculate waterdepth and save it as GeoTIFF.
 
@@ -771,11 +772,11 @@ def calculate_waterdepth(
     }
     if netcdf:
         converter_class = NetcdfConverter
-        converter_kwargs['result_admin'] = result_admin
-        converter_kwargs['calculation_steps'] = calculation_steps
+        converter_kwargs["result_admin"] = result_admin
+        converter_kwargs["calculation_steps"] = calculation_steps
     else:
         converter_class = GeoTIFFConverter
-        converter_kwargs['band_count'] = len(calculation_steps)
+        converter_kwargs["band_count"] = len(calculation_steps)
 
     with converter_class(**converter_kwargs) as converter:
         calculator_kwargs_except_step = {
@@ -783,6 +784,8 @@ def calculate_waterdepth(
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
+        if mode.startswith("bilinear"):
+            calculator_kwargs_except_step["threshold"] = threshold
         for band, calculation_step in progress_class:
             calculator_kwargs = {
                 "calculation_step": calculation_step,
