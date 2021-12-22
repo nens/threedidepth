@@ -96,7 +96,10 @@ def threedidepth(*args):
     )
     kwargs = vars(parser.parse_args())
 
-    kwargs["threshold"] = float('1e' + str(-7))
+    threshold = kwargs.pop("threshold")
+    if threshold is not None:
+        kwargs["threshold"] = float('1e' + str(threshold))
+
     kwargs["mode"] = MODE[Choice(
         b=kwargs.pop("bilinear"),
         c=kwargs.pop("constant"),
