@@ -35,15 +35,15 @@ Or python::
     >>> threedidepth.calculate_waterdepth(...)
 
 
-Development installation with docker-compose
+Development installation with Docker Compose
 --------------------------------------------
 
-For development, clone the repository and use a docker-compose setup::
+For development, clone the repository and use a docker compose setup::
 
-    $ docker-compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
-    $ docker-compose up --no-start
-    $ docker-compose start
-    $ docker-compose exec lib bash
+    $ docker compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
+    $ docker compose up --no-start
+    $ docker compose start
+    $ docker compose exec lib bash
 
 Create a virtualenv::
 

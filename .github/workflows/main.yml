@@ -11,26 +11,26 @@ on:
 # in parallel
 jobs:
   build:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
 
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can
       # access it
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Build docker
-        run: docker-compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
+        run: docker compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
 
       - name: Create virtualenv
-        run: docker-compose run --rm lib virtualenv .venv --system-site-packages
+        run: docker compose run --rm lib virtualenv .venv --system-site-packages
 
       - name: Install requirements
-        run: docker-compose run --rm lib pip install -r requirements.txt
+        run: docker compose run --rm lib pip install -r requirements.txt
 
       - name: Install our package
-        run: docker-compose run --rm lib pip install -e .[test]
+        run: docker compose run --rm lib pip install -e .[test]
 
       - name: Run tests
-        run: docker-compose run --rm lib pytest
+        run: docker compose run --rm lib pytest
 
       - name: Flake8
-        run: if docker-compose run --rm lib flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi
+        run: if docker compose run --rm lib flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi
