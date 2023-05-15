@@ -1,4 +1,4 @@
-FROM ubuntu:bionic
+FROM ubuntu:jammy
 
 LABEL maintainer="arjan.verkerk@nelen-schuurmans.nl"
 
@@ -15,6 +15,10 @@ RUN apt-get update && apt-get install -y \
     locales \
     python3-pip \
     python3-gdal \
+    python3-dev \
+    libcairo2-dev \
+    pkg-config \
+    libgirepository1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN locale-gen en_US.UTF-8
