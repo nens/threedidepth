@@ -6,7 +6,7 @@ from os import path
 from osgeo import gdal
 from osgeo import osr
 from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import qhull
+from scipy.spatial import Delaunay
 import h5netcdf.legacyapi as netCDF4
 import h5py
 import numpy as np
@@ -129,7 +129,7 @@ class BaseCalculator:
         """
         Return a (delaunay, s1) tuple.
 
-        `delaunay` is a qhull.Delaunay object, and `s1` is an array of
+        `delaunay` is a scipy.spatial.Delaunay object, and `s1` is an array of
         waterlevels for the corresponding delaunay simplices.
         """
         try:
@@ -144,7 +144,7 @@ class BaseCalculator:
             # reorder a la lizard
             points, s1 = morton.reorder(points, s1)
 
-            delaunay = qhull.Delaunay(points)
+            delaunay = Delaunay(points)
             self.cache[self.DELAUNAY] = delaunay, s1
             return delaunay, s1
 
