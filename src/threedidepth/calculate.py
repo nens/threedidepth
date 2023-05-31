@@ -130,7 +130,7 @@ class BaseCalculator:
         Return a (delaunay, s1) tuple.
 
         `delaunay` is a qhull.Delaunay object, and `s1` is an array of
-        waterlevels for the corresponding delaunay vertices.
+        waterlevels for the corresponding delaunay simplices.
         """
         try:
             return self.cache[self.DELAUNAY]
@@ -243,18 +243,18 @@ class LizardLevelCalculator(BaseCalculator):
 
         # get the nodes and the transform for the corresponding triangles
         transform = delaunay.transform[simplices[in_interpol]]
-        vertices = delaunay.vertices[simplices[in_interpol]]
+        simplices = delaunay.simplices[simplices[in_interpol]]
 
         # calculate weight, see print(spatial.Delaunay.transform.__doc__) and
         # Wikipedia about barycentric coordinates
-        weight = np.empty(vertices.shape)
+        weight = np.empty(simplices.shape)
         weight[:, :2] = np.sum(
             transform[:, :2] * (points - transform[:, 2])[:, np.newaxis], 2
         )
         weight[:, 2] = 1 - weight[:, 0] - weight[:, 1]
 
         # set weight to zero when for inactive nodes
-        nodelevel = s1[vertices]
+        nodelevel = s1[simplices]
         weight[nodelevel == NO_DATA_VALUE] = 0
 
         # determine the sum of weights per result cell
