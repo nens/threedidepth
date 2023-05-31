@@ -657,6 +657,7 @@ def calculate_waterdepth(
     dem_path,
     waterdepth_path,
     calculation_steps=None,
+    calculate_maximum_waterlevel=False,
     mode=MODE_LIZARD,
     progress_func=None,
     netcdf=False,
