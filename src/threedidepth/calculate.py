@@ -44,8 +44,10 @@ class BaseCalculator:
     DELAUNAY = "delaunay"
 
     def __init__(
-        self, result_admin, calculation_step, dem_shape, dem_geo_transform,
+        self, result_admin, dem_shape, dem_geo_transform, calculation_step=None, get_max_level=False
     ):
+        if (calculation_step == None and get_max_level == False) or (calculation_step != None and get_max_level == True):
+            raise ValueError("Either provide a calculation_step or set get_max_level to True, not both or neither")
         self.ra = result_admin
         self.calculation_step = calculation_step
         self.dem_shape = dem_shape
@@ -84,9 +86,9 @@ class BaseCalculator:
 
         return depth
 
-    @property
-    def indexes(self):
-        return slice(self.calculation_step, self.calculation_step + 1)
+    @staticmethod
+    def indexes(calculation_step):
+        return slice(calculation_step, calculation_step + 1)
 
     @property
     def lookup_s1(self):
@@ -101,23 +103,28 @@ class BaseCalculator:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
+            timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
             data = timeseries.only(self.ra.variable, "id").data
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
             lookup_s1[data["id"]] = data[self.ra.variable][0]
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
+    
+    @property
+    def s1(self):
+        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
+        data = timeseries.only(self.ra.variable, "coordinates").data
+        points = data["coordinates"].transpose()
+        values = data[self.ra.variable][0]
+        return points, values
 
     @property
     def interpolator(self):
         try:
             return self.cache[self.INTERPOLATOR]
         except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "coordinates").data
-            points = data["coordinates"].transpose()
-            values = data[self.ra.variable][0]
+            points, values = self.s1
             interpolator = LinearNDInterpolator(
                 points, values, fill_value=NO_DATA_VALUE
             )
@@ -135,11 +142,7 @@ class BaseCalculator:
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "coordinates").data
-            points = data["coordinates"].transpose()
-            s1 = data[self.ra.variable][0]
+            points, s1 = self.s1
 
             # reorder a la lizard
             points, s1 = morton.reorder(points, s1)
@@ -716,11 +719,14 @@ def calculate_waterdepth(
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
         }
-        for band, calculation_step in progress_class:
-            calculator_kwargs = {
-                "calculation_step": calculation_step,
-                **calculator_kwargs_except_step,
-            }
+        if calculate_maximum_waterlevel:
+            pass
+        else:
+            for band, calculation_step in progress_class:
+                calculator_kwargs = {
+                    "calculation_step": calculation_step,
+                    **calculator_kwargs_except_step,
+                }
 
-            with CalculatorClass(**calculator_kwargs) as calculator:
-                converter.convert_using(calculator=calculator, band=band)
+                with CalculatorClass(**calculator_kwargs) as calculator:
+                    converter.convert_using(calculator=calculator, band=band)
