@@ -46,10 +46,11 @@ class BaseCalculator:
     def __init__(
         self, result_admin, dem_shape, dem_geo_transform, calculation_step=None, get_max_level=False
     ):
-        if (calculation_step == None and get_max_level == False) or (calculation_step != None and get_max_level == True):
-            raise ValueError("Either provide a calculation_step or set get_max_level to True, not both or neither")
+        if calculation_step is None and not get_max_level:
+            raise ValueError("a calculation_step is required unless get_max_level is True")
         self.ra = result_admin
         self.calculation_step = calculation_step
+        self.get_max_level = get_max_level
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
 
@@ -103,30 +104,38 @@ class BaseCalculator:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
-            data = timeseries.only(self.ra.variable, "id").data
+            if self.get_max_level:
+                timeseries = nodes.timeseries(start_time=0, end_time=self.ra.get_timestamps(self.ra.calculation_steps-1))  # array van Ntimesteps * Nnodes
+                data = timeseries.only(self.ra.variable, "id").data
+                s1 = np.max(data[self.ra.variable], axis=0)
+            else:
+                timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
+                data = timeseries.only(self.ra.variable, "id").data
+                s1 = data[self.ra.variable][0]
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data[self.ra.variable][0]
+            lookup_s1[data["id"]] = s1
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
-    
+
     @property
-    def s1(self):
+    def coordinates(self):
         nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-        timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
-        data = timeseries.only(self.ra.variable, "coordinates").data
+        data = nodes.only("id", "coordinates").data
+        # transpose does:
+        # [[x1, x2, x3], [y1, y2, y3]] --> [[x1, y1], [x2, y2], [x3, y3]]
         points = data["coordinates"].transpose()
-        values = data[self.ra.variable][0]
-        return points, values
+        ids = data["id"]
+        return points, ids
 
     @property
     def interpolator(self):
         try:
             return self.cache[self.INTERPOLATOR]
         except KeyError:
-            points, values = self.s1
+            points, ids = self.coordinates
+            s1 = self.lookup_s1[ids]
             interpolator = LinearNDInterpolator(
-                points, values, fill_value=NO_DATA_VALUE
+                points, s1, fill_value=NO_DATA_VALUE
             )
             self.cache[self.INTERPOLATOR] = interpolator
             return interpolator
@@ -134,22 +143,22 @@ class BaseCalculator:
     @property
     def delaunay(self):
         """
-        Return a (delaunay, s1) tuple.
+        Return a (delaunay, ids) tuple.
 
-        `delaunay` is a scipy.spatial.Delaunay object, and `s1` is an array of
-        waterlevels for the corresponding delaunay simplices.
+        `delaunay` is a scipy.spatial.Delaunay object, and `ids` is an array of
+        ids for the corresponding simplices.
         """
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
-            points, s1 = self.s1
+            points, ids = self.coordinates
 
             # reorder a la lizard
-            points, s1 = morton.reorder(points, s1)
+            points, ids = morton.reorder(points, ids)
 
             delaunay = Delaunay(points)
-            self.cache[self.DELAUNAY] = delaunay, s1
-            return delaunay, s1
+            self.cache[self.DELAUNAY] = delaunay, ids
+            return delaunay, ids
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -235,7 +244,8 @@ class LizardLevelCalculator(BaseCalculator):
 
         # determine result raster cell centers and in which triangle they are
         points = self._get_points(indices)
-        delaunay, s1 = self.delaunay
+        delaunay, ids = self.delaunay
+        s1 = self.lookup_s1[ids]
         simplices = delaunay.find_simplex(points)
 
         # determine which points will use interpolation
@@ -685,6 +695,8 @@ def calculate_waterdepth(
     )
 
     # handle calculation step
+    if calculate_maximum_waterlevel:
+        calculation_steps = [0]
     max_calculation_step = result_admin.calculation_steps - 1
     if calculation_steps is None:
         calculation_steps = [max_calculation_step]
@@ -718,15 +730,14 @@ def calculate_waterdepth(
             "result_admin": result_admin,
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
+            "get_max_level": calculate_maximum_waterlevel
         }
-        if calculate_maximum_waterlevel:
-            pass
-        else:
-            for band, calculation_step in progress_class:
-                calculator_kwargs = {
-                    "calculation_step": calculation_step,
-                    **calculator_kwargs_except_step,
-                }
 
-                with CalculatorClass(**calculator_kwargs) as calculator:
-                    converter.convert_using(calculator=calculator, band=band)
+        for band, calculation_step in progress_class:
+            calculator_kwargs = {
+                "calculation_step": calculation_step,
+                **calculator_kwargs_except_step,
+            }
+
+            with CalculatorClass(**calculator_kwargs) as calculator:
+                converter.convert_using(calculator=calculator, band=band)
