@@ -105,7 +105,7 @@ class BaseCalculator:
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             if self.get_max_level:
-                timeseries = nodes.timeseries(start_time=0, end_time=self.ra.get_timestamps(self.ra.calculation_steps-1))  # array van Ntimesteps * Nnodes
+                timeseries = nodes.timeseries(indexes=slice(0, self.ra.calculation_steps))  # array van Ntimesteps * Nnodes
                 data = timeseries.only(self.ra.variable, "id").data
                 s1 = np.max(data[self.ra.variable], axis=0)
             else:
