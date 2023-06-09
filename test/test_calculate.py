@@ -327,12 +327,17 @@ def test_calculators(mode, expected, admin):
     admin.variable = "s1"
     if mode in (MODE_CONSTANT_S1):
         data = {"id": ids, "s1": s1}
-        admin.nodes.subset().timeseries().only().data = admin.nodes.subset().only().data = data
+        admin.nodes.subset().timeseries().only().data = data
+        admin.nodes.subset().only().data = data
     if mode in (MODE_LINEAR_S1):
         data = {"id": ids, "coordinates": coordinates, "s1": s1}
-        admin.nodes.subset().timeseries().only().data = admin.nodes.subset().only().data = data
+        admin.nodes.subset().timeseries().only().data = data
+        admin.nodes.subset().only().data = data
     if mode in (MODE_LIZARD_S1):
-        admin.nodes.subset().timeseries().only.side_effect = admin.nodes.subset().only.side_effect = [
+        admin.nodes.subset().timeseries().only.side_effect = [
+            mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
+        ]
+        admin.nodes.subset().only.side_effect = [
             mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
         ]
 

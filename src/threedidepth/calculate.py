@@ -44,10 +44,13 @@ class BaseCalculator:
     DELAUNAY = "delaunay"
 
     def __init__(
-        self, result_admin, dem_shape, dem_geo_transform, calculation_step=None, get_max_level=False
+        self, result_admin, dem_shape, dem_geo_transform,
+        calculation_step=None, get_max_level=False
     ):
         if calculation_step is None and not get_max_level:
-            raise ValueError("a calculation_step is required unless get_max_level is True")
+            raise ValueError(
+                "a calculation_step is required unless get_max_level is True"
+            )
         self.ra = result_admin
         self.calculation_step = calculation_step
         self.get_max_level = get_max_level
@@ -105,11 +108,16 @@ class BaseCalculator:
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
             if self.get_max_level:
-                timeseries = nodes.timeseries(indexes=slice(0, self.ra.calculation_steps))  # array van Ntimesteps * Nnodes
+                # array van Ntimesteps * Nnodes
+                timeseries = nodes.timeseries(
+                    indexes=slice(0, self.ra.calculation_steps)
+                )
                 data = timeseries.only(self.ra.variable, "id").data
                 s1 = np.max(data[self.ra.variable], axis=0)
             else:
-                timeseries = nodes.timeseries(indexes=self.indexes(self.calculation_step))
+                timeseries = nodes.timeseries(
+                    indexes=self.indexes(self.calculation_step)
+                )
                 data = timeseries.only(self.ra.variable, "id").data
                 s1 = data[self.ra.variable][0]
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
@@ -455,7 +463,7 @@ class NetcdfConverter(GeoTIFFConverter):
             target_path,
             result_admin,
             calculation_steps,
-            write_time_dimension = True,
+            write_time_dimension=True,
             **kwargs
     ):
         kwargs["band_count"] = len(calculation_steps)
@@ -470,7 +478,6 @@ class NetcdfConverter(GeoTIFFConverter):
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         self.target = netCDF4.Dataset(self.target_path, "w")
         self._set_coords()
-        # TODO: make conditional on not get_max_level BEFORE merging into master
         if self.write_time_dimension:
             self._set_time()
         self._set_meta_info()
@@ -552,7 +559,7 @@ class NetcdfConverter(GeoTIFFConverter):
         water_depth = self.target.createVariable(
             "water_depth",
             "f4",
-            (("time", "y", "x",) if self.write_time_dimension else ("y", "x",)),
+            ("time", "y", "x",) if self.write_time_dimension else ("y", "x",),
             fill_value=-9999,
             zlib=True
         )
@@ -581,7 +588,9 @@ class NetcdfConverter(GeoTIFFConverter):
             # write
             water_depth = self.target['water_depth']
             if self.write_time_dimension:
-                water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
+                water_depth[
+                    band, yoff:yoff + ysize, xoff:xoff + xsize
+                ] = result
             else:
                 water_depth[yoff:yoff + ysize, xoff:xoff + xsize] = result
 
@@ -728,7 +737,9 @@ def calculate_waterdepth(
         converter_class = NetcdfConverter
         converter_kwargs['result_admin'] = result_admin
         converter_kwargs['calculation_steps'] = calculation_steps
-        converter_kwargs['write_time_dimension'] = not calculate_maximum_waterlevel
+        converter_kwargs[
+            'write_time_dimension'
+        ] = not calculate_maximum_waterlevel
     else:
         converter_class = GeoTIFFConverter
         converter_kwargs['band_count'] = len(calculation_steps)

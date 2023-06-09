@@ -41,7 +41,7 @@ def threedidepth(*args):
         "--maximum",
         action="store_true",
         dest="calculate_maximum_waterlevel",
-        help="calculate maximum waterlevel instead of waterlevel at specific timestep(s)",
+        help="calculate maximum waterlevel instead of waterlevel per timestep",
     )
     parser.add_argument(
         "-c",

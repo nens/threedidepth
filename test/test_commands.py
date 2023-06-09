@@ -72,5 +72,3 @@ def test_command_with_multiple_steps(tmpdir):
             progress_func=None,
             netcdf=False
         )
-
-
