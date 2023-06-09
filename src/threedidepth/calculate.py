@@ -455,6 +455,7 @@ class NetcdfConverter(GeoTIFFConverter):
             target_path,
             result_admin,
             calculation_steps,
+            write_time_dimension = True,
             **kwargs
     ):
         kwargs["band_count"] = len(calculation_steps)
@@ -462,13 +463,16 @@ class NetcdfConverter(GeoTIFFConverter):
 
         self.ra = result_admin
         self.calculation_steps = calculation_steps
+        self.write_time_dimension = write_time_dimension
 
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         self.target = netCDF4.Dataset(self.target_path, "w")
         self._set_coords()
-        self._set_time()
+        # TODO: make conditional on not get_max_level BEFORE merging into master
+        if self.write_time_dimension:
+            self._set_time()
         self._set_meta_info()
         self._create_variable()
 
@@ -548,7 +552,7 @@ class NetcdfConverter(GeoTIFFConverter):
         water_depth = self.target.createVariable(
             "water_depth",
             "f4",
-            ("time", "y", "x",),
+            (("time", "y", "x",) if self.write_time_dimension else ("y", "x",)),
             fill_value=-9999,
             zlib=True
         )
@@ -576,7 +580,10 @@ class NetcdfConverter(GeoTIFFConverter):
 
             # write
             water_depth = self.target['water_depth']
-            water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
+            if self.write_time_dimension:
+                water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
+            else:
+                water_depth[yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
 class ProgressClass:
@@ -721,6 +728,7 @@ def calculate_waterdepth(
         converter_class = NetcdfConverter
         converter_kwargs['result_admin'] = result_admin
         converter_kwargs['calculation_steps'] = calculation_steps
+        converter_kwargs['write_time_dimension'] = not calculate_maximum_waterlevel
     else:
         converter_class = GeoTIFFConverter
         converter_kwargs['band_count'] = len(calculation_steps)
