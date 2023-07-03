@@ -13,6 +13,11 @@ Calculate waterdepths for 3Di results. For results of type 'raw' the variable
 For the interpolated mode, the 'lizard'-method is used. For a detailed
 description, read the docstring for the `LizardLevelCalculator`.
 
+For the maximum waterlevel calculation, the maximum waterlevel for each point
+is taken before the interpolation is applied. This can lead to situations where
+the highest waterlevel for a pixel for a certain timestep is higher than the
+maximum waterlevel for the pixel.
+
 
 Installation
 ------------

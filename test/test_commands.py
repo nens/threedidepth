@@ -20,6 +20,7 @@ def test_command(tmpdir):
             waterdepth_path="d",
             calculation_steps=None,
             mode=commands.MODE_LIZARD,
+            calculate_maximum_waterlevel=False,
             progress_func=None,
             netcdf=False
         )
@@ -33,6 +34,21 @@ def test_command(tmpdir):
             waterdepth_path="d",
             calculation_steps=None,
             mode=commands.MODE_CONSTANT,
+            calculate_maximum_waterlevel=False,
+            progress_func=None,
+            netcdf=False
+        )
+        args.append("--maximum")
+        with mock.patch.object(sys, "argv", args):
+            commands.threedidepth()
+        wd.assert_called_with(
+            gridadmin_path="a",
+            results_3di_path="b",
+            dem_path="c",
+            waterdepth_path="d",
+            calculation_steps=None,
+            mode=commands.MODE_CONSTANT,
+            calculate_maximum_waterlevel=True,
             progress_func=None,
             netcdf=False
         )
@@ -52,6 +68,7 @@ def test_command_with_multiple_steps(tmpdir):
             waterdepth_path="d",
             calculation_steps=[1, 2, 3],
             mode=commands.MODE_LIZARD,
+            calculate_maximum_waterlevel=False,
             progress_func=None,
             netcdf=False
         )

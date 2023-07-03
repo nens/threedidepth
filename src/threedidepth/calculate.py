@@ -6,7 +6,7 @@ from os import path
 from osgeo import gdal
 from osgeo import osr
 from scipy.interpolate import LinearNDInterpolator
-from scipy.spatial import qhull
+from scipy.spatial import Delaunay
 import h5netcdf.legacyapi as netCDF4
 import h5py
 import numpy as np
@@ -44,10 +44,16 @@ class BaseCalculator:
     DELAUNAY = "delaunay"
 
     def __init__(
-        self, result_admin, calculation_step, dem_shape, dem_geo_transform,
+        self, result_admin, dem_shape, dem_geo_transform,
+        calculation_step=None, get_max_level=False
     ):
+        if calculation_step is None and not get_max_level:
+            raise ValueError(
+                "a calculation_step is required unless get_max_level is True"
+            )
         self.ra = result_admin
         self.calculation_step = calculation_step
+        self.get_max_level = get_max_level
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
 
@@ -84,9 +90,9 @@ class BaseCalculator:
 
         return depth
 
-    @property
-    def indexes(self):
-        return slice(self.calculation_step, self.calculation_step + 1)
+    @staticmethod
+    def indexes(calculation_step):
+        return slice(calculation_step, calculation_step + 1)
 
     @property
     def lookup_s1(self):
@@ -101,25 +107,43 @@ class BaseCalculator:
             return self.cache[self.LOOKUP_S1]
         except KeyError:
             nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "id").data
+            if self.get_max_level:
+                # array van Ntimesteps * Nnodes
+                timeseries = nodes.timeseries(
+                    indexes=slice(0, self.ra.calculation_steps)
+                )
+                data = timeseries.only(self.ra.variable, "id").data
+                s1 = np.max(data[self.ra.variable], axis=0)
+            else:
+                timeseries = nodes.timeseries(
+                    indexes=self.indexes(self.calculation_step)
+                )
+                data = timeseries.only(self.ra.variable, "id").data
+                s1 = data[self.ra.variable][0]
             lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = data[self.ra.variable][0]
+            lookup_s1[data["id"]] = s1
             self.cache[self.LOOKUP_S1] = lookup_s1
         return lookup_s1
+
+    @property
+    def coordinates(self):
+        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        data = nodes.only("id", "coordinates").data
+        # transpose does:
+        # [[x1, x2, x3], [y1, y2, y3]] --> [[x1, y1], [x2, y2], [x3, y3]]
+        points = data["coordinates"].transpose()
+        ids = data["id"]
+        return points, ids
 
     @property
     def interpolator(self):
         try:
             return self.cache[self.INTERPOLATOR]
         except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "coordinates").data
-            points = data["coordinates"].transpose()
-            values = data[self.ra.variable][0]
+            points, ids = self.coordinates
+            s1 = self.lookup_s1[ids]
             interpolator = LinearNDInterpolator(
-                points, values, fill_value=NO_DATA_VALUE
+                points, s1, fill_value=NO_DATA_VALUE
             )
             self.cache[self.INTERPOLATOR] = interpolator
             return interpolator
@@ -127,26 +151,22 @@ class BaseCalculator:
     @property
     def delaunay(self):
         """
-        Return a (delaunay, s1) tuple.
+        Return a (delaunay, ids) tuple.
 
-        `delaunay` is a qhull.Delaunay object, and `s1` is an array of
-        waterlevels for the corresponding delaunay vertices.
+        `delaunay` is a scipy.spatial.Delaunay object, and `ids` is an array of
+        ids for the corresponding simplices.
         """
         try:
             return self.cache[self.DELAUNAY]
         except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            timeseries = nodes.timeseries(indexes=self.indexes)
-            data = timeseries.only(self.ra.variable, "coordinates").data
-            points = data["coordinates"].transpose()
-            s1 = data[self.ra.variable][0]
+            points, ids = self.coordinates
 
             # reorder a la lizard
-            points, s1 = morton.reorder(points, s1)
+            points, ids = morton.reorder(points, ids)
 
-            delaunay = qhull.Delaunay(points)
-            self.cache[self.DELAUNAY] = delaunay, s1
-            return delaunay, s1
+            delaunay = Delaunay(points)
+            self.cache[self.DELAUNAY] = delaunay, ids
+            return delaunay, ids
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -232,7 +252,8 @@ class LizardLevelCalculator(BaseCalculator):
 
         # determine result raster cell centers and in which triangle they are
         points = self._get_points(indices)
-        delaunay, s1 = self.delaunay
+        delaunay, ids = self.delaunay
+        s1 = self.lookup_s1[ids]
         simplices = delaunay.find_simplex(points)
 
         # determine which points will use interpolation
@@ -243,18 +264,18 @@ class LizardLevelCalculator(BaseCalculator):
 
         # get the nodes and the transform for the corresponding triangles
         transform = delaunay.transform[simplices[in_interpol]]
-        vertices = delaunay.vertices[simplices[in_interpol]]
+        simplices = delaunay.simplices[simplices[in_interpol]]
 
         # calculate weight, see print(spatial.Delaunay.transform.__doc__) and
         # Wikipedia about barycentric coordinates
-        weight = np.empty(vertices.shape)
+        weight = np.empty(simplices.shape)
         weight[:, :2] = np.sum(
             transform[:, :2] * (points - transform[:, 2])[:, np.newaxis], 2
         )
         weight[:, 2] = 1 - weight[:, 0] - weight[:, 1]
 
         # set weight to zero when for inactive nodes
-        nodelevel = s1[vertices]
+        nodelevel = s1[simplices]
         weight[nodelevel == NO_DATA_VALUE] = 0
 
         # determine the sum of weights per result cell
@@ -442,6 +463,7 @@ class NetcdfConverter(GeoTIFFConverter):
             target_path,
             result_admin,
             calculation_steps,
+            write_time_dimension=True,
             **kwargs
     ):
         kwargs["band_count"] = len(calculation_steps)
@@ -449,13 +471,15 @@ class NetcdfConverter(GeoTIFFConverter):
 
         self.ra = result_admin
         self.calculation_steps = calculation_steps
+        self.write_time_dimension = write_time_dimension
 
     def __enter__(self):
         """Open datasets"""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         self.target = netCDF4.Dataset(self.target_path, "w")
         self._set_coords()
-        self._set_time()
+        if self.write_time_dimension:
+            self._set_time()
         self._set_meta_info()
         self._create_variable()
 
@@ -535,7 +559,7 @@ class NetcdfConverter(GeoTIFFConverter):
         water_depth = self.target.createVariable(
             "water_depth",
             "f4",
-            ("time", "y", "x",),
+            ("time", "y", "x",) if self.write_time_dimension else ("y", "x",),
             fill_value=-9999,
             zlib=True
         )
@@ -563,7 +587,12 @@ class NetcdfConverter(GeoTIFFConverter):
 
             # write
             water_depth = self.target['water_depth']
-            water_depth[band, yoff:yoff + ysize, xoff:xoff + xsize] = result
+            if self.write_time_dimension:
+                water_depth[
+                    band, yoff:yoff + ysize, xoff:xoff + xsize
+                ] = result
+            else:
+                water_depth[yoff:yoff + ysize, xoff:xoff + xsize] = result
 
 
 class ProgressClass:
@@ -657,6 +686,7 @@ def calculate_waterdepth(
     dem_path,
     waterdepth_path,
     calculation_steps=None,
+    calculate_maximum_waterlevel=False,
     mode=MODE_LIZARD,
     progress_func=None,
     netcdf=False,
@@ -681,6 +711,8 @@ def calculate_waterdepth(
     )
 
     # handle calculation step
+    if calculate_maximum_waterlevel:
+        calculation_steps = [0]
     max_calculation_step = result_admin.calculation_steps - 1
     if calculation_steps is None:
         calculation_steps = [max_calculation_step]
@@ -705,6 +737,9 @@ def calculate_waterdepth(
         converter_class = NetcdfConverter
         converter_kwargs['result_admin'] = result_admin
         converter_kwargs['calculation_steps'] = calculation_steps
+        converter_kwargs[
+            'write_time_dimension'
+        ] = not calculate_maximum_waterlevel
     else:
         converter_class = GeoTIFFConverter
         converter_kwargs['band_count'] = len(calculation_steps)
@@ -714,7 +749,9 @@ def calculate_waterdepth(
             "result_admin": result_admin,
             "dem_geo_transform": converter.geo_transform,
             "dem_shape": (converter.raster_y_size, converter.raster_x_size),
+            "get_max_level": calculate_maximum_waterlevel
         }
+
         for band, calculation_step in progress_class:
             calculator_kwargs = {
                 "calculation_step": calculation_step,

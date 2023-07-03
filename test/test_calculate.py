@@ -328,13 +328,17 @@ def test_calculators(mode, expected, admin):
     if mode in (MODE_CONSTANT_S1):
         data = {"id": ids, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
+        admin.nodes.subset().only().data = data
     if mode in (MODE_LINEAR_S1):
-        data = {"coordinates": coordinates, "s1": s1}
+        data = {"id": ids, "coordinates": coordinates, "s1": s1}
         admin.nodes.subset().timeseries().only().data = data
+        admin.nodes.subset().only().data = data
     if mode in (MODE_LIZARD_S1):
         admin.nodes.subset().timeseries().only.side_effect = [
-            mock.Mock(data={"id": ids, "s1": s1}),
-            mock.Mock(data={"coordinates": coordinates, "s1": s1}),
+            mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
+        ]
+        admin.nodes.subset().only.side_effect = [
+            mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
         ]
 
     indexes = slice(7, 8)
@@ -367,7 +371,7 @@ def test_calculators(mode, expected, admin):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_called_with(
-            "s1", "coordinates",
+            "s1", "id",
         )
     if mode in (MODE_CONSTANT_S1):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
@@ -379,7 +383,7 @@ def test_calculators(mode, expected, admin):
         admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
         admin.nodes.subset().timeseries().only.assert_has_calls(
-            [mock.call("s1", "id"), mock.call("s1", "coordinates")]
+            [mock.call("s1", "id")]
         )
 
 

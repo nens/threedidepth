@@ -28,13 +28,20 @@ def threedidepth(*args):
         metavar="waterdepth",
         help="path to resulting geotiff"
     )
-    parser.add_argument(
+    calculation_type_group = parser.add_mutually_exclusive_group()
+    calculation_type_group.add_argument(
         "-s",
         "--steps",
         nargs="+",
         type=int,
         dest="calculation_steps",
         help="simulation result step(s)",
+    )
+    calculation_type_group.add_argument(
+        "--maximum",
+        action="store_true",
+        dest="calculate_maximum_waterlevel",
+        help="calculate maximum waterlevel instead of waterlevel per timestep",
     )
     parser.add_argument(
         "-c",
