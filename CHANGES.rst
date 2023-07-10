@@ -2,8 +2,8 @@ Changelog of threedidepth
 =========================
 
 
-0.6 (unreleased)
-----------------
+0.6.0 (2023-07-10)
+------------------
 
 - Update dependency versions
 - Add support for calculating maximum waterlevel as well as per timestep.
