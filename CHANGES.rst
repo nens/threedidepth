@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.6.1 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Add release action for automatic upload to GitHub and PyPI.
 
 
 0.6.0 (2023-07-10)
