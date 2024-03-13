@@ -434,6 +434,11 @@ class GeoTIFFConverter:
             band (int): Which band to write to.
         """
         no_data_value = self.no_data_value
+
+        if no_data_value is None:
+            # if no_data_value is not defined, assign -9999.0 as the default
+            no_data_value = -9999.0
+
         for (xoff, xsize), (yoff, ysize) in self.partition():
             # read
             values = self.source.ReadAsArray(

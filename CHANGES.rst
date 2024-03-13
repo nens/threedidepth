@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.6.2 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Assign a default value if no_data_value is undefined.
 
 
 0.6.1 (2023-07-11)
