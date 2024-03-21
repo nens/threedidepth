@@ -387,7 +387,8 @@ class GeoTIFFConverter:
 
     @property
     def no_data_value(self):
-        return self.source.GetRasterBand(1).GetNoDataValue()
+        value = self.source.GetRasterBand(1).GetNoDataValue()
+        return value if value is not None else -9999.0
 
     @property
     def raster_x_size(self):
@@ -434,10 +435,6 @@ class GeoTIFFConverter:
             band (int): Which band to write to.
         """
         no_data_value = self.no_data_value
-
-        if no_data_value is None:
-            # if no_data_value is not defined, assign -9999.0 as the default
-            no_data_value = -9999.0
 
         for (xoff, xsize), (yoff, ysize) in self.partition():
             # read
