@@ -5,7 +5,7 @@ from os.path import splitext
 from setuptools import find_packages
 from setuptools import setup
 
-version = '0.6.3.dev0'
+version = '0.6.3'
 
 with open('README.rst') as readme_file:
     readme = readme_file.read()
