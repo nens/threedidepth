@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.6.3 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Fix no_data_value is undefined.
 
 
 0.6.2 (2024-03-14)
