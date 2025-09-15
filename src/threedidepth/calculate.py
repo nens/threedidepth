@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from functools import cached_property
 from itertools import product
 from os import path
 
@@ -26,6 +27,7 @@ MODE_LIZARD_S1 = "lizard-s1"
 MODE_CONSTANT = "constant"
 MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
+MODE_LIZARD_WQ = "lizard-wq"
 
 
 class BaseCalculator:
@@ -37,12 +39,6 @@ class BaseCalculator:
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
     """
-
-    PIXEL_MAP = "pixel_map"
-    LOOKUP_S1 = "lookup_s1"
-    INTERPOLATOR = "interpolator"
-    DELAUNAY = "delaunay"
-
     def __init__(
         self, result_admin, dem_shape, dem_geo_transform,
         calculation_step=None, get_max_level=False
@@ -94,8 +90,8 @@ class BaseCalculator:
     def indexes(calculation_step):
         return slice(calculation_step, calculation_step + 1)
 
-    @property
-    def lookup_s1(self):
+    @cached_property
+    def variable_lut(self):
         """
         Return the lookup table to find waterlevel by cell id.
 
@@ -103,27 +99,23 @@ class BaseCalculator:
         are currently not active ('no data') will return the NO_DATA_VALUE as
         defined in threedigrid.
         """
-        try:
-            return self.cache[self.LOOKUP_S1]
-        except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            if self.get_max_level:
-                # array van Ntimesteps * Nnodes
-                timeseries = nodes.timeseries(
-                    indexes=slice(0, self.ra.calculation_steps)
-                )
-                data = timeseries.only(self.ra.variable, "id").data
-                s1 = np.max(data[self.ra.variable], axis=0)
-            else:
-                timeseries = nodes.timeseries(
-                    indexes=self.indexes(self.calculation_step)
-                )
-                data = timeseries.only(self.ra.variable, "id").data
-                s1 = data[self.ra.variable][0]
-            lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = s1
-            self.cache[self.LOOKUP_S1] = lookup_s1
-        return lookup_s1
+        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        if self.get_max_level:
+            # array van Ntimesteps * Nnodes
+            timeseries = nodes.timeseries(
+                indexes=slice(0, self.ra.calculation_steps)
+            )
+            data = timeseries.only(self.ra.variable, "id").data
+            s1 = np.max(data[self.ra.variable], axis=0)
+        else:
+            timeseries = nodes.timeseries(
+                indexes=self.indexes(self.calculation_step)
+            )
+            data = timeseries.only(self.ra.variable, "id").data
+            s1 = data[self.ra.variable][0]
+        variable_lut = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
+        variable_lut[data["id"]] = s1
+        return variable_lut
 
     @property
     def coordinates(self):
@@ -135,20 +127,16 @@ class BaseCalculator:
         ids = data["id"]
         return points, ids
 
-    @property
+    @cached_property
     def interpolator(self):
-        try:
-            return self.cache[self.INTERPOLATOR]
-        except KeyError:
-            points, ids = self.coordinates
-            s1 = self.lookup_s1[ids]
-            interpolator = LinearNDInterpolator(
-                points, s1, fill_value=NO_DATA_VALUE
-            )
-            self.cache[self.INTERPOLATOR] = interpolator
-            return interpolator
+        points, ids = self.coordinates
+        s1 = self.lookup_s1[ids]
+        interpolator = LinearNDInterpolator(
+            points, s1, fill_value=NO_DATA_VALUE
+        )
+        return interpolator
 
-    @property
+    @cached_property
     def delaunay(self):
         """
         Return a (delaunay, ids) tuple.
@@ -156,17 +144,13 @@ class BaseCalculator:
         `delaunay` is a scipy.spatial.Delaunay object, and `ids` is an array of
         ids for the corresponding simplices.
         """
-        try:
-            return self.cache[self.DELAUNAY]
-        except KeyError:
-            points, ids = self.coordinates
+        points, ids = self.coordinates
 
-            # reorder a la lizard
-            points, ids = morton.reorder(points, ids)
+        # reorder a la lizard
+        points, ids = morton.reorder(points, ids)
 
-            delaunay = Delaunay(points)
-            self.cache[self.DELAUNAY] = delaunay, ids
-            return delaunay, ids
+        delaunay = Delaunay(points)
+        return delaunay, ids
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -201,7 +185,9 @@ class BaseCalculator:
         return self
 
     def __exit__(self, *args):
-        self.cache = None
+        del self.variable_lut
+        del self.interpolator
+        del self.nodgrid
 
 
 class CopyCalculator(BaseCalculator):
@@ -679,6 +665,7 @@ calculator_classes = {
     MODE_CONSTANT: ConstantLevelDepthCalculator,
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
+    MODE_LIZARD_WQ: LizardLevelCalculator,
 }
 
 
@@ -701,7 +688,12 @@ def calculate_waterdepth(
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
         calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        calculate_maximum_waterlevel (bool):
+          Use temporal maximum instead of specific timestep
         mode (str): Interpolation mode.
+        progress_func(callable):
+          Function that receives progress updates as float between 0 and 1
+        netcdf(bool): Write a netCDF file instead of a GeoTIFF.
     """
     try:
         CalculatorClass = calculator_classes[mode]
@@ -762,3 +754,32 @@ def calculate_waterdepth(
 
             with CalculatorClass(**calculator_kwargs) as calculator:
                 converter.convert_using(calculator=calculator, band=band)
+
+
+def calculate_water_quality(
+    gridadmin_path,
+    water_quality_results_3di_path,
+    concentration_path,
+    substance_id,
+    calculation_steps=None,
+    calculate_maximum_concentration=False,
+    mode=MODE_LIZARD,
+    progress_func=None,
+    netcdf=False,
+):
+    """Calculate concentation and save it as GeoTIFF.
+
+    Args:
+        gridadmin_path (str): Path to gridadmin.h5 file.
+        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
+        dem_path (str): Path to dem.tif file.
+        waterdepth_path (str): Path to waterdepth.tif file.
+        calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        calculate_maximum_waterlevel (bool):
+          Use temporal maximum instead of specific timestep
+        mode (str): Interpolation mode.
+        progress_func(callable):
+          Function that receives progress updates as float between 0 and 1
+        netcdf(bool): Write a netCDF file instead of a GeoTIFF.
+    """
+    print("foo")

@@ -57,6 +57,7 @@ setup(
     entry_points={
         'console_scripts': [
             'threedidepth=threedidepth.commands:threedidepth',
+            'threediwq=threedidepth.commands:threediwq',
         ],
     },
 )

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import sys
 
 from osgeo import gdal
 
 from threedidepth.calculate import calculate_waterdepth
+from threedidepth.calculate import calculate_water_quality
 from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import MODE_CONSTANT
 
@@ -71,5 +71,68 @@ def threedidepth(*args):
     calculate_waterdepth(**kwargs)
 
 
-if __name__ == '__main__':
-    threedidepth(sys.argv)
+def threediwq(*args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "gridadmin_path", metavar="gridadmin", help="path to gridadmin.h5 file"
+    )
+    parser.add_argument(
+        "water_quality_results_3di_path",
+        metavar="water_quality_results_3di",
+        help="path to water_quality_results_3di.nc file",
+    )
+    parser.add_argument(
+        "concentration_path",
+        metavar="concentration",
+        help="path to resulting geotiff"
+    )
+    parser.add_argument(
+        "-i",
+        "--substance-id",
+        type=int,
+        dest="substance_id",
+        help="Substance id in netcdf",
+    )
+    calculation_type_group = parser.add_mutually_exclusive_group()
+    calculation_type_group.add_argument(
+        "-s",
+        "--steps",
+        nargs="+",
+        type=int,
+        dest="calculation_steps",
+        help="simulation result step(s)",
+    )
+    calculation_type_group.add_argument(
+        "--maximum",
+        action="store_true",
+        dest="calculate_maximum_concentration",
+        help=("calculate maximum concentration instead of"
+              "concentration per timestep"),
+    )
+    parser.add_argument(
+        "-c",
+        "--constant",
+        action="store_true",
+        help=("disable interpolation and use "
+              "constant concentration per grid cell"),
+    )
+    parser.add_argument(
+        "-p",
+        "--progress",
+        action="store_const",
+        dest="progress_func",
+        const=gdal.TermProgress_nocb,
+        help="Show progress.",
+    )
+    parser.add_argument(
+        "-n",
+        "--netcdf",
+        action="store_true",
+        help="export the concentration as a netcdf"
+    )
+    kwargs = vars(parser.parse_args())
+    if kwargs.pop("constant"):
+        kwargs["mode"] = MODE_CONSTANT
+    else:
+        kwargs["mode"] = MODE_LIZARD
+    calculate_water_quality(**kwargs)
