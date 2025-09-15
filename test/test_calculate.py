@@ -106,9 +106,9 @@ def test_progress_class():
     for i, calculation_step in progress_class:
         assert calculation_step == calculation_steps[i]
         progress_class(0.5)
-        assert progress_func.called_with(i + 0.25)
+        progress_func.assert_called_with(i / 2 + 0.25)
         progress_class(1.0)
-        assert progress_func.called_with(i + 0.50)
+        progress_func.assert_called_with(i / 2 + 0.50)
 
 
 @mark.parametrize("source_path", [False, True], indirect=True)

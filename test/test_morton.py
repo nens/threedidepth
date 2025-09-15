@@ -26,8 +26,8 @@ def test_morton_array():
 
 def test_group():
     array = np.array([0.6, 0.6, 0.6, 0.5, 0.7, 0.5, 0.7, 0.5, 0.7])
-    expected = [[3, 5, 7], [0, 1, 2], [4, 6, 8]]
-    result = [i.tolist() for i in morton.group(array)]
+    expected = [{3, 5, 7}, {0, 1, 2}, {4, 6, 8}]
+    result = [set(i) for i in morton.group(array)]
     assert result == expected
 
 

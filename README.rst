@@ -53,7 +53,7 @@ For development, clone the repository and use a docker compose setup::
 Create a virtualenv::
 
     # note that Dockerfile prepends .venv/bin to $PATH
-    (docker)$ virtualenv .venv --system-site-packages
+    (docker)$ python3 -m venv .venv --system-site-packages
 
 Install dependencies & package and run tests::
 
