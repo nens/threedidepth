@@ -82,16 +82,19 @@ def threediwq(*args):
         help="path to water_quality_results_3di.nc file",
     )
     parser.add_argument(
-        "concentration_path",
-        metavar="concentration",
-        help="path to resulting geotiff"
+        "variable",
+        type=str,
+        help="Substance variable in netcdf",
     )
     parser.add_argument(
-        "-i",
-        "--substance-id",
+        "output_extent",
         type=int,
-        dest="substance_id",
-        help="Substance id in netcdf",
+        nargs=4,
+        help="Extent for resulting geotiff",
+    )
+    parser.add_argument(
+        "output_path",
+        help="path to resulting geotiff"
     )
     calculation_type_group = parser.add_mutually_exclusive_group()
     calculation_type_group.add_argument(

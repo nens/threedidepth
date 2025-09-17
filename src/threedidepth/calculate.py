@@ -14,6 +14,7 @@ import numpy as np
 
 from threedigrid.admin.gridresultadmin import GridH5ResultAdmin
 from threedigrid.admin.gridresultadmin import GridH5AggregateResultAdmin
+from threedigrid.admin.gridresultadmin import GridH5WaterQualityResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
@@ -625,7 +626,7 @@ class ResultAdmin:
     `result_type`, `variable` and `calculation_steps`.
     """
 
-    def __init__(self, gridadmin_path, results_3di_path):
+    def __init__(self, gridadmin_path, results_3di_path, variable=None):
         with h5py.File(results_3di_path) as h5:
             self.result_type = h5.attrs['result_type'].decode('ascii')
 
@@ -634,10 +635,19 @@ class ResultAdmin:
             self._result_admin = GridH5ResultAdmin(*result_admin_args)
             self.variable = "s1"
             self.calculation_steps = self.nodes.timestamps.size
-        else:
+        elif self.result_type == "aggregate":
             self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
             self.variable = "s1_max"
             self.calculation_steps = self.nodes.timestamps[self.variable].size
+        else:
+            assert self.result_type == "Water Quality Results"
+            assert variable is not None
+            self._result_admin = GridH5WaterQualityResultAdmin(
+                *result_admin_args
+            )
+            self.variable = variable
+            breakpoint() 
+            self.calculation_steps = self.nodes.timestamps.size
 
     def get_timestamps(self, calculation_steps):
         if self.result_type == "raw":
@@ -703,6 +713,7 @@ def calculate_waterdepth(
     result_admin = ResultAdmin(
         gridadmin_path=gridadmin_path, results_3di_path=results_3di_path,
     )
+    assert result_admin.result_type in {"raw", "aggregate"}
 
     # handle calculation step
     if calculate_maximum_waterlevel:
@@ -759,8 +770,9 @@ def calculate_waterdepth(
 def calculate_water_quality(
     gridadmin_path,
     water_quality_results_3di_path,
-    concentration_path,
-    substance_id,
+    variable,
+    output_extent,
+    output_path,
     calculation_steps=None,
     calculate_maximum_concentration=False,
     mode=MODE_LIZARD,
@@ -771,9 +783,9 @@ def calculate_water_quality(
 
     Args:
         gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to (aggregate_)results_3di.nc file.
-        dem_path (str): Path to dem.tif file.
-        waterdepth_path (str): Path to waterdepth.tif file.
+        results_3di_path (str): Path to water_quality_results_3di.nc file.
+        extent(tuple): Extent for the output concentration GeoTIFF file.
+        concentration_path (str): Path to output concentration GeoTIFF file.
         calculation_steps (list(int)): Calculation step (default: [-1] (last))
         calculate_maximum_waterlevel (bool):
           Use temporal maximum instead of specific timestep
@@ -781,5 +793,14 @@ def calculate_water_quality(
         progress_func(callable):
           Function that receives progress updates as float between 0 and 1
         netcdf(bool): Write a netCDF file instead of a GeoTIFF.
+
+    The actual extent of the output will be the extent argument rounded
+    to align with dem cells.
     """
-    print("foo")
+    result_admin = ResultAdmin(  # noqa
+        gridadmin_path=gridadmin_path,
+        results_3di_path=water_quality_results_3di_path,
+        variable=variable,
+    )
+    assert result_admin.result_type == "Water Quality Results"
+    breakpoint()
