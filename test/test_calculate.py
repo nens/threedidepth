@@ -219,7 +219,8 @@ def test_calculate_waterdepth_wrong_mode():
 
 
 def test_calculate_waterdepth_wrong_step(admin):
-    admin.calculation_steps = 2
+    admin.get_timestamps().size = 2
+    admin.result_type = "raw"
     with raises(AssertionError, match="Maximum calculation step is"):
         calculate_waterdepth(
             gridadmin_path="dummy",
@@ -232,7 +233,8 @@ def test_calculate_waterdepth_wrong_step(admin):
 
 
 def test_calculate_waterdepth(source_path, target_path, admin):
-    admin.calculation_steps = 2
+    admin.get_timestamps().size = 2
+    admin.result_type = "raw"
     with mock.patch("threedidepth.calculate.fix_gridadmin"):
         calculate_waterdepth(
             gridadmin_path="dummy",
@@ -327,17 +329,17 @@ def test_calculators(mode, expected, admin):
     admin.variable = "s1"
     if mode in (MODE_CONSTANT_S1):
         data = {"id": ids, "s1": s1}
-        admin.nodes.subset().timeseries().only().data = data
-        admin.nodes.subset().only().data = data
+        admin.get_nodes().subset().timeseries().only().data = data
+        admin.get_nodes().subset().only().data = data
     if mode in (MODE_LINEAR_S1):
         data = {"id": ids, "coordinates": coordinates, "s1": s1}
-        admin.nodes.subset().timeseries().only().data = data
-        admin.nodes.subset().only().data = data
+        admin.get_nodes().subset().timeseries().only().data = data
+        admin.get_nodes().subset().only().data = data
     if mode in (MODE_LIZARD_S1):
-        admin.nodes.subset().timeseries().only.side_effect = [
+        admin.get_nodes().subset().timeseries().only.side_effect = [
             mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
         ]
-        admin.nodes.subset().only.side_effect = [
+        admin.get_nodes().subset().only.side_effect = [
             mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
         ]
 
@@ -356,8 +358,8 @@ def test_calculators(mode, expected, admin):
     }
 
     CalculatorClass = calculator_classes[mode]
-    with CalculatorClass(**calculator_kwargs) as calculator:
-        result = calculator(**call_kwargs)
+    calculator = CalculatorClass(**calculator_kwargs)
+    result = calculator(**call_kwargs)
     assert_allclose(result, expected)
 
     # check gridadmin uses
@@ -368,23 +370,58 @@ def test_calculators(mode, expected, admin):
             subset_name=SUBSET_2D_OPEN_WATER,
         )
     if mode in (MODE_LINEAR_S1):
-        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
-        admin.nodes.subset().timeseries().only.assert_called_with(
+        admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
+        admin.get_nodes().subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
     if mode in (MODE_CONSTANT_S1):
-        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
-        admin.nodes.subset().timeseries().only.assert_called_with(
+        admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
+        admin.get_nodes().subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
     if mode in (MODE_LIZARD_S1):
-        admin.nodes.subset.assert_called_with(SUBSET_2D_OPEN_WATER)
-        admin.nodes.subset().timeseries.assert_called_with(indexes=indexes)
-        admin.nodes.subset().timeseries().only.assert_has_calls(
+        admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
+        admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
+        admin.get_nodes().subset().timeseries().only.assert_has_calls(
             [mock.call("s1", "id")]
         )
+
+
+def test_base_calculator_get_max_level(admin):
+    nodgrid = np.array([
+        [1, 1, 2, 2, 3, 3],
+        [1, 1, 2, 2, 3, 3],
+        [4, 4, 0, 5, 6, 7],
+        [4, 4, 5, 5, 8, 9],
+    ])  # note that 0 means no grid cell at all in threedigrid
+    geo_transform = (20, 2, 0, 48, 0, -2)  # bbox: (20, 40, 32, 48)
+    s1 = np.array([
+        [0.0, 0.0, 3.0, 0.0, 5.0, 0.0, 7.0, 0.0, 9.0],
+        [1.0, 2.0, 0.0, 4.0, 0.0, 6.0, 0.0, 8.0, 0.0],
+    ])
+    s1[:, :3] = NDV
+    ids = np.arange(1, 10)
+
+    # prepare gridadmin uses
+    admin.variable = "s1"
+    data = {"id": ids, "s1": s1}
+    admin.get_nodes().subset().timeseries().only().data = data
+    # admin.get_nodes().subset().only().data = data
+
+    indexes = slice(7, 8)
+    calculator_kwargs = {
+        "result_admin": admin,
+        "get_max_level": True,
+        "dem_shape": nodgrid.shape,
+        "dem_geo_transform": geo_transform,
+    }
+
+    CalculatorClass = BaseCalculator
+    calculator = CalculatorClass(**calculator_kwargs)
+    variable_lut = calculator.variable_lut
+    assert variable_lut.tolist() == [NLV, NDV, NDV, NDV, 4, 5, 6, 7, 8, 9]
 
 
 @fixture

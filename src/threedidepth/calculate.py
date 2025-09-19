@@ -44,10 +44,7 @@ class BaseCalculator:
         self, result_admin, dem_shape, dem_geo_transform,
         calculation_step=None, get_max_level=False
     ):
-        if calculation_step is None and not get_max_level:
-            raise ValueError(
-                "a calculation_step is required unless get_max_level is True"
-            )
+        assert get_max_level == (calculation_step is None)  # only one allowed
         self.ra = result_admin
         self.calculation_step = calculation_step
         self.get_max_level = get_max_level
@@ -87,10 +84,6 @@ class BaseCalculator:
 
         return depth
 
-    @staticmethod
-    def indexes(calculation_step):
-        return slice(calculation_step, calculation_step + 1)
-
     @cached_property
     def variable_lut(self):
         """
@@ -100,27 +93,26 @@ class BaseCalculator:
         are currently not active ('no data') will return the NO_DATA_VALUE as
         defined in threedigrid.
         """
-        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        nodes = self.ra.get_nodes().subset(SUBSET_2D_OPEN_WATER)
+        n_time = self.ra.get_timestamps().size
         if self.get_max_level:
-            # array van Ntimesteps * Nnodes
-            timeseries = nodes.timeseries(
-                indexes=slice(0, self.ra.calculation_steps)
-            )
+            # array off n_time * n_nodes
+            timeseries = nodes.timeseries(indexes=slice(0, n_time))
             data = timeseries.only(self.ra.variable, "id").data
-            s1 = np.max(data[self.ra.variable], axis=0)
+            values = np.max(data[self.ra.variable], axis=0)
         else:
-            timeseries = nodes.timeseries(
-                indexes=self.indexes(self.calculation_step)
-            )
+            timeseries = nodes.timeseries(indexes=slice(
+                self.calculation_step, self.calculation_step + 1
+            ))
             data = timeseries.only(self.ra.variable, "id").data
-            s1 = data[self.ra.variable][0]
+            values = data[self.ra.variable][0]
         variable_lut = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-        variable_lut[data["id"]] = s1
+        variable_lut[data["id"]] = values
         return variable_lut
 
     @property
     def coordinates(self):
-        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        nodes = self.ra.get_nodes().subset(SUBSET_2D_OPEN_WATER)
         data = nodes.only("id", "coordinates").data
         # transpose does:
         # [[x1, x2, x3], [y1, y2, y3]] --> [[x1, y1], [x2, y2], [x3, y3]]
@@ -131,9 +123,9 @@ class BaseCalculator:
     @cached_property
     def interpolator(self):
         points, ids = self.coordinates
-        s1 = self.lookup_s1[ids]
+        values = self.variable_lut[ids]
         interpolator = LinearNDInterpolator(
-            points, s1, fill_value=NO_DATA_VALUE
+            points, values, fill_value=NO_DATA_VALUE
         )
         return interpolator
 
@@ -181,15 +173,6 @@ class BaseCalculator:
         p, a, b, q, c, d = self.dem_geo_transform
         return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
-    def __enter__(self):
-        self.cache = {}
-        return self
-
-    def __exit__(self, *args):
-        del self.variable_lut
-        del self.interpolator
-        del self.nodgrid
-
 
 class CopyCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
@@ -206,7 +189,7 @@ class NodGridCalculator(BaseCalculator):
 class ConstantLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
-        return self.lookup_s1[self._get_nodgrid(indices)]
+        return self.variable_lut[self._get_nodgrid(indices)]
 
 
 class LinearLevelCalculator(BaseCalculator):
@@ -235,12 +218,12 @@ class LizardLevelCalculator(BaseCalculator):
         used."""
         # start with the constant level result
         nodgrid = self._get_nodgrid(indices).ravel()
-        level = self.lookup_s1[nodgrid]
+        level = self.variable_lut[nodgrid]
 
         # determine result raster cell centers and in which triangle they are
         points = self._get_points(indices)
         delaunay, ids = self.delaunay
-        s1 = self.lookup_s1[ids]
+        s1 = self.variable_lut[ids]
         simplices = delaunay.find_simplex(points)
 
         # determine which points will use interpolation
@@ -497,7 +480,7 @@ class NetcdfConverter(GeoTIFFConverter):
         time.calendar = "standard"
         time.axis = "T"
         time.units = self.ra.get_time_units()
-        time[:] = self.ra.get_timestamps(self.calculation_steps)
+        time[:] = self.ra.get_timestamps()[self.calculation_steps]
 
     def _set_coords(self):
         geotransform = self.source.GetGeoTransform()
@@ -621,9 +604,17 @@ class ResultAdmin:
         gridadmin_path (str): Path to gridadmin.h5 file.
         results_3di_path (str): Path to (aggregate_)results_3di.nc file.
 
-    Wraps either GridH5ResultAdmin or GridH5AggregateResultAdmin, based on the
-    result type of the file at results_3di_path . Also has custom properties
-    `result_type`, `variable` and `calculation_steps`.
+    There differences in the way the different ResultAdmin classes from
+    threedigrid work. The GridH5ResultAdmin and the GridH5AggregateResultAdmin
+    give access to all variables through the same nodes instance, but for the
+    latter the timestamps is a mapping because they can be different from
+    variable to variable. The GridH5WaterQualityResultAdmin has each variable
+    as presented as its own "nodes" attribute on the object.
+
+    This class selects the correct ResultAdmin class, and adds a number of
+    custom properties that are otherwise derived or used in different ways from
+    the different ResultAdmins: `result_type`, `variable` and
+    `calculation_steps` and `unodes` (unified nodes)
     """
 
     def __init__(self, gridadmin_path, results_3di_path, variable=None):
@@ -633,34 +624,40 @@ class ResultAdmin:
         result_admin_args = gridadmin_path, results_3di_path
         if self.result_type == "raw":
             self._result_admin = GridH5ResultAdmin(*result_admin_args)
+            self.nodes_attr = "nodes"
             self.variable = "s1"
-            self.calculation_steps = self.nodes.timestamps.size
         elif self.result_type == "aggregate":
             self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
+            self.nodes_attr = "nodes"
             self.variable = "s1_max"
-            self.calculation_steps = self.nodes.timestamps[self.variable].size
         else:
-            assert self.result_type == "Water Quality Results"
-            assert variable is not None
+            assert self.result_type == "Water Quality Results", 'b'
+            assert variable is not None, 'c'
             self._result_admin = GridH5WaterQualityResultAdmin(
                 *result_admin_args
             )
-            self.variable = variable
-            breakpoint() 
-            self.calculation_steps = self.nodes.timestamps.size
+            self.nodes_attr = variable
+            self.variable = "concentration"
 
-    def get_timestamps(self, calculation_steps):
-        if self.result_type == "raw":
-            return self.nodes.timestamps[calculation_steps]
+    def get_nodes(self):
+        return getattr(self._result_admin, self.nodes_attr)
+
+    def get_timestamps(self):
+        nodes = self.get_nodes()
+        if self.result_type == "aggregate":
+            return nodes.timestamps[self.variable]
         else:
-            return self.nodes.timestamps[self.variable][calculation_steps]
+            return nodes.timestamps
 
     def get_time_units(self):
         if self.result_type == "raw":
             return self.time_units.decode("utf-8")
+        if self.result_type == "aggregate":
+            time_variable = "time_s1_max"
         else:
-            nc = self._result_admin.netcdf_file
-            return nc['time_s1_max'].attrs['units'].decode('utf-8')
+            time_variable = "time"
+        nc = self._result_admin.netcdf_file
+        return nc[time_variable].attrs['units'].decode('utf-8')
 
     def __getattr__(self, name):
         return getattr(self._result_admin, name)
@@ -718,7 +715,8 @@ def calculate_waterdepth(
     # handle calculation step
     if calculate_maximum_waterlevel:
         calculation_steps = [0]
-    max_calculation_step = result_admin.calculation_steps - 1
+
+    max_calculation_step = result_admin.get_timestamps().size - 1
     if calculation_steps is None:
         calculation_steps = [max_calculation_step]
     else:
@@ -763,8 +761,8 @@ def calculate_waterdepth(
                 **calculator_kwargs_except_step,
             }
 
-            with CalculatorClass(**calculator_kwargs) as calculator:
-                converter.convert_using(calculator=calculator, band=band)
+            calculator = CalculatorClass(**calculator_kwargs)
+            converter.convert_using(calculator=calculator, band=band)
 
 
 def calculate_water_quality(
@@ -802,5 +800,4 @@ def calculate_water_quality(
         results_3di_path=water_quality_results_3di_path,
         variable=variable,
     )
-    assert result_admin.result_type == "Water Quality Results"
-    breakpoint()
+    assert result_admin.result_type == "Water Quality Results", 'a'
