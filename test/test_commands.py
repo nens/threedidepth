@@ -82,7 +82,7 @@ def test_threediwq(tmpdir):
             output_extent=[1, 2, 3, 4],
             output_path="d",
             calculation_steps=None,
-            mode=commands.MODE_LIZARD,
+            mode=commands.MODE_LIZARD_VAR,
             calculate_maximum_concentration=False,
             progress_func=None,
             netcdf=False
@@ -97,7 +97,7 @@ def test_threediwq(tmpdir):
             output_extent=[1, 2, 3, 4],
             output_path="d",
             calculation_steps=None,
-            mode=commands.MODE_CONSTANT,
+            mode=commands.MODE_CONSTANT_VAR,
             calculate_maximum_concentration=False,
             progress_func=None,
             netcdf=False
@@ -112,7 +112,7 @@ def test_threediwq(tmpdir):
             output_extent=[1, 2, 3, 4],
             output_path="d",
             calculation_steps=None,
-            mode=commands.MODE_CONSTANT,
+            mode=commands.MODE_CONSTANT_VAR,
             calculate_maximum_concentration=True,
             progress_func=None,
             netcdf=False
@@ -132,7 +132,7 @@ def test_threediwq_with_multiple_steps(tmpdir):
             output_extent=[1, 2, 3, 4],
             output_path="d",
             calculation_steps=[1, 2, 3],
-            mode=commands.MODE_LIZARD,
+            mode=commands.MODE_LIZARD_VAR,
             calculate_maximum_concentration=False,
             progress_func=None,
             netcdf=False

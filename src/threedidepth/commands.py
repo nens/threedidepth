@@ -6,8 +6,10 @@ from osgeo import gdal
 
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import calculate_water_quality
-from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import MODE_CONSTANT
+from threedidepth.calculate import MODE_CONSTANT_VAR
+from threedidepth.calculate import MODE_LIZARD
+from threedidepth.calculate import MODE_LIZARD_VAR
 
 
 def threedidepth(*args):
@@ -135,7 +137,7 @@ def threediwq(*args):
     )
     kwargs = vars(parser.parse_args())
     if kwargs.pop("constant"):
-        kwargs["mode"] = MODE_CONSTANT
+        kwargs["mode"] = MODE_CONSTANT_VAR
     else:
-        kwargs["mode"] = MODE_LIZARD
+        kwargs["mode"] = MODE_LIZARD_VAR
     calculate_water_quality(**kwargs)

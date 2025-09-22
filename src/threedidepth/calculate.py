@@ -18,13 +18,14 @@ from threedigrid.admin.gridresultadmin import GridH5WaterQualityResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
+from threedidepth.tiffs import AuxGeoTIFF
 from threedidepth import morton
 
 MODE_COPY = "copy"
 MODE_NODGRID = "nodgrid"
-MODE_CONSTANT_S1 = "constant-s1"
-MODE_LINEAR_S1 = "linear-s1"
-MODE_LIZARD_S1 = "lizard-s1"
+MODE_CONSTANT_VAR = "constant-var"
+MODE_LINEAR_VAR = "linear-var"
+MODE_LIZARD_VAR = "lizard-var"
 MODE_CONSTANT = "constant"
 MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
@@ -631,8 +632,8 @@ class ResultAdmin:
             self.nodes_attr = "nodes"
             self.variable = "s1_max"
         else:
-            assert self.result_type == "Water Quality Results", 'b'
-            assert variable is not None, 'c'
+            assert self.result_type == "Water Quality Results"
+            assert variable is not None
             self._result_admin = GridH5WaterQualityResultAdmin(
                 *result_admin_args
             )
@@ -666,9 +667,9 @@ class ResultAdmin:
 calculator_classes = {
     MODE_COPY: CopyCalculator,
     MODE_NODGRID: NodGridCalculator,
-    MODE_CONSTANT_S1: ConstantLevelCalculator,
-    MODE_LINEAR_S1: LinearLevelCalculator,
-    MODE_LIZARD_S1: LizardLevelCalculator,
+    MODE_CONSTANT_VAR: ConstantLevelCalculator,
+    MODE_LINEAR_VAR: LinearLevelCalculator,
+    MODE_LIZARD_VAR: LizardLevelCalculator,
     MODE_CONSTANT: ConstantLevelDepthCalculator,
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
@@ -773,7 +774,7 @@ def calculate_water_quality(
     output_path,
     calculation_steps=None,
     calculate_maximum_concentration=False,
-    mode=MODE_LIZARD,
+    mode=MODE_LIZARD_VAR,
     progress_func=None,
     netcdf=False,
 ):
@@ -795,9 +796,74 @@ def calculate_water_quality(
     The actual extent of the output will be the extent argument rounded
     to align with dem cells.
     """
-    result_admin = ResultAdmin(  # noqa
+    result_admin = ResultAdmin(
         gridadmin_path=gridadmin_path,
         results_3di_path=water_quality_results_3di_path,
         variable=variable,
     )
-    assert result_admin.result_type == "Water Quality Results", 'a'
+    assert result_admin.result_type == "Water Quality Results"
+
+    try:
+        CalculatorClass = calculator_classes[mode]
+    except KeyError:
+        raise ValueError("Unknown mode: '%s'" % mode)
+
+    # handle calculation step
+    if calculate_maximum_concentration:
+        calculation_steps = [0]
+
+    max_calculation_step = result_admin.get_timestamps().size - 1
+    if calculation_steps is None:
+        calculation_steps = [max_calculation_step]
+    else:
+        assert min(calculation_steps) >= 0
+        assert max(calculation_steps) <= max_calculation_step, (
+            "Maximum calculation step is '%s'." % max_calculation_step
+        )
+
+    # construct a prototype in-memory geotiff
+    dx, _, xmin, _, dy, ymin = result_admin.grid.transform
+    prototype_path = AuxGeoTIFF(
+        bbox=output_extent,
+        origin=(xmin, ymin),
+        cellsize=(dx, dy),
+        projection=osr.GetUserInputAsWKT(f"EPSG:{result_admin.epsg_code}"),
+    )
+
+    # set up things
+    progress_class = ProgressClass(
+        calculation_steps=calculation_steps, progress_func=progress_func,
+    )
+    converter_kwargs = {
+        "source_path": prototype_path,
+        "target_path": output_path,
+        "progress_func": None if progress_func is None else progress_class,
+    }
+    if netcdf:
+        converter_class = NetcdfConverter
+        converter_kwargs['result_admin'] = result_admin
+        converter_kwargs['calculation_steps'] = calculation_steps
+        converter_kwargs[
+            'write_time_dimension'
+        ] = not calculate_maximum_concentration
+    else:
+        converter_class = GeoTIFFConverter
+        converter_kwargs['band_count'] = len(calculation_steps)
+
+    # calculate
+    with converter_class(**converter_kwargs) as converter:
+        calculator_kwargs_except_step = {
+            "result_admin": result_admin,
+            "dem_geo_transform": converter.geo_transform,
+            "dem_shape": (converter.raster_y_size, converter.raster_x_size),
+            "get_max_level": calculate_maximum_concentration
+        }
+
+        for band, calculation_step in progress_class:
+            calculator_kwargs = {
+                "calculation_step": calculation_step,
+                **calculator_kwargs_except_step,
+            }
+
+            calculator = CalculatorClass(**calculator_kwargs)
+            converter.convert_using(calculator=calculator, band=band)

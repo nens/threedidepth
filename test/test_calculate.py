@@ -16,12 +16,12 @@ import numpy as np
 from threedidepth.calculate import BaseCalculator
 from threedidepth.calculate import GeoTIFFConverter
 from threedidepth.calculate import MODE_CONSTANT
-from threedidepth.calculate import MODE_CONSTANT_S1
+from threedidepth.calculate import MODE_CONSTANT_VAR
 from threedidepth.calculate import MODE_COPY
 from threedidepth.calculate import MODE_LINEAR
-from threedidepth.calculate import MODE_LINEAR_S1
+from threedidepth.calculate import MODE_LINEAR_VAR
 from threedidepth.calculate import MODE_LIZARD
-from threedidepth.calculate import MODE_LIZARD_S1
+from threedidepth.calculate import MODE_LIZARD_VAR
 from threedidepth.calculate import MODE_NODGRID
 from threedidepth.calculate import NetcdfConverter
 from threedidepth.calculate import ProgressClass
@@ -277,19 +277,19 @@ data = (
                   [5, 5, 8, 9]]),
     ),
     (
-        MODE_CONSTANT_S1,
+        MODE_CONSTANT_VAR,
         np.array([[NLV, NLV, NLV, NLV],
                   [NLV, 5.0, 6.0, 7.0],
                   [5.0, 5.0, 8.0, 9.0]]),
     ),
     (
-        MODE_LINEAR_S1,
+        MODE_LINEAR_VAR,
         np.array([[EL1, EL2, EL2, NLV],
                   [EL3, EL4, 6.0, 7.0],
                   [NLV, NLV, 8.0, 9.0]]),
     ),
     (
-        MODE_LIZARD_S1,
+        MODE_LIZARD_VAR,
         np.array([[NLV, NLV, NLV, NLV],
                   [NLV, 5.4, 6.0, 7.0],
                   [5.0, 5.0, 8.0, 9.0]]),
@@ -327,15 +327,15 @@ def test_calculators(mode, expected, admin):
     # prepare gridadmin uses
     admin.cells.get_nodgrid.return_value = nodgrid[tuple(map(slice, *indices))]
     admin.variable = "s1"
-    if mode in (MODE_CONSTANT_S1):
+    if mode in (MODE_CONSTANT_VAR):
         data = {"id": ids, "s1": s1}
         admin.get_nodes().subset().timeseries().only().data = data
         admin.get_nodes().subset().only().data = data
-    if mode in (MODE_LINEAR_S1):
+    if mode in (MODE_LINEAR_VAR):
         data = {"id": ids, "coordinates": coordinates, "s1": s1}
         admin.get_nodes().subset().timeseries().only().data = data
         admin.get_nodes().subset().only().data = data
-    if mode in (MODE_LIZARD_S1):
+    if mode in (MODE_LIZARD_VAR):
         admin.get_nodes().subset().timeseries().only.side_effect = [
             mock.Mock(data={"id": ids, "coordinates": coordinates, "s1": s1})
         ]
@@ -363,25 +363,25 @@ def test_calculators(mode, expected, admin):
     assert_allclose(result, expected)
 
     # check gridadmin uses
-    if mode in (MODE_NODGRID, MODE_CONSTANT_S1, MODE_LIZARD_S1):
+    if mode in (MODE_NODGRID, MODE_CONSTANT_VAR, MODE_LIZARD_VAR):
         # get_nodgrid() wants (1, 2), (4, 6) flipped & transposed
         admin.cells.get_nodgrid.assert_called_once_with(
             [2, 0, 6, 3],
             subset_name=SUBSET_2D_OPEN_WATER,
         )
-    if mode in (MODE_LINEAR_S1):
+    if mode in (MODE_LINEAR_VAR):
         admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
         admin.get_nodes().subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
-    if mode in (MODE_CONSTANT_S1):
+    if mode in (MODE_CONSTANT_VAR):
         admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
         admin.get_nodes().subset().timeseries().only.assert_called_with(
             "s1", "id",
         )
-    if mode in (MODE_LIZARD_S1):
+    if mode in (MODE_LIZARD_VAR):
         admin.get_nodes().subset.assert_called_with(SUBSET_2D_OPEN_WATER)
         admin.get_nodes().subset().timeseries.assert_called_with(indexes=indexes)
         admin.get_nodes().subset().timeseries().only.assert_has_calls(
