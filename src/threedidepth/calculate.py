@@ -152,11 +152,21 @@ class BaseCalculator:
         Args:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
+        # (xm, ym) is the lower-left nodgrid origin
+        dx, _, xm, _, dy, ym = self.ra.grid.transform
+
+        # (xi, yi) is the upper-left target origin
+        xt, yt = self.dem_geo_transform[::3]
+
+        # compute the distance in cells between these origins
+        dj = round((xt - xm) / dx)
+        di = round((yt - ym) / dy)
+
         (i1, j1), (i2, j2) = indices
 
         # note that get_nodgrid() starts counting rows from the bottom
-        h = self.dem_shape[0]
-        i1, i2 = h - i2, h - i1
+        i1, i2 = di - i2, di - i1
+        j1, j2 = dj + j1, dj + j2
 
         # note that get_nodgrid() expects a columns-first bbox
         return self.ra.cells.get_nodgrid(
@@ -320,8 +330,7 @@ class GeoTIFFConverter:
             raise OSError("%s already exists." % self.target_path)
 
     def __enter__(self):
-        """Open datasets.
-        """
+        """Open datasets."""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         block_x_size, block_y_size = self.block_size
         options = ["compress=deflate", "blockysize=%s" % block_y_size]
@@ -823,47 +832,47 @@ def calculate_water_quality(
 
     # construct a prototype in-memory geotiff
     dx, _, xmin, _, dy, ymin = result_admin.grid.transform
-    prototype_path = AuxGeoTIFF(
+    with AuxGeoTIFF(
         bbox=output_extent,
         origin=(xmin, ymin),
         cellsize=(dx, dy),
         projection=osr.GetUserInputAsWKT(f"EPSG:{result_admin.epsg_code}"),
-    )
+    ) as prototype_path:
 
-    # set up things
-    progress_class = ProgressClass(
-        calculation_steps=calculation_steps, progress_func=progress_func,
-    )
-    converter_kwargs = {
-        "source_path": prototype_path,
-        "target_path": output_path,
-        "progress_func": None if progress_func is None else progress_class,
-    }
-    if netcdf:
-        converter_class = NetcdfConverter
-        converter_kwargs['result_admin'] = result_admin
-        converter_kwargs['calculation_steps'] = calculation_steps
-        converter_kwargs[
-            'write_time_dimension'
-        ] = not calculate_maximum_concentration
-    else:
-        converter_class = GeoTIFFConverter
-        converter_kwargs['band_count'] = len(calculation_steps)
-
-    # calculate
-    with converter_class(**converter_kwargs) as converter:
-        calculator_kwargs_except_step = {
-            "result_admin": result_admin,
-            "dem_geo_transform": converter.geo_transform,
-            "dem_shape": (converter.raster_y_size, converter.raster_x_size),
-            "get_max_level": calculate_maximum_concentration
+        # set up things
+        progress_class = ProgressClass(
+            calculation_steps=calculation_steps, progress_func=progress_func,
+        )
+        converter_kwargs = {
+            "source_path": prototype_path,
+            "target_path": output_path,
+            "progress_func": None if progress_func is None else progress_class,
         }
+        if netcdf:
+            converter_class = NetcdfConverter
+            converter_kwargs['result_admin'] = result_admin
+            converter_kwargs['calculation_steps'] = calculation_steps
+            converter_kwargs[
+                'write_time_dimension'
+            ] = not calculate_maximum_concentration
+        else:
+            converter_class = GeoTIFFConverter
+            converter_kwargs['band_count'] = len(calculation_steps)
 
-        for band, calculation_step in progress_class:
-            calculator_kwargs = {
-                "calculation_step": calculation_step,
-                **calculator_kwargs_except_step,
+        # calculate
+        with converter_class(**converter_kwargs) as converter:
+            calculator_kwargs_except_step = {
+                "result_admin": result_admin,
+                "dem_geo_transform": converter.geo_transform,
+                "dem_shape": (converter.raster_y_size, converter.raster_x_size),
+                "get_max_level": calculate_maximum_concentration
             }
 
-            calculator = CalculatorClass(**calculator_kwargs)
-            converter.convert_using(calculator=calculator, band=band)
+            for band, calculation_step in progress_class:
+                calculator_kwargs = {
+                    "calculation_step": calculation_step,
+                    **calculator_kwargs_except_step,
+                }
+
+                calculator = CalculatorClass(**calculator_kwargs)
+                converter.convert_using(calculator=calculator, band=band)
