@@ -791,11 +791,12 @@ def calculate_water_quality(
 
     Args:
         gridadmin_path (str): Path to gridadmin.h5 file.
-        results_3di_path (str): Path to water_quality_results_3di.nc file.
-        extent(tuple): Extent for the output concentration GeoTIFF file.
-        concentration_path (str): Path to output concentration GeoTIFF file.
+        water_quality_results_3di_path (str): Path to water_quality_results_3di.nc file.
+        variable(str): Name of the substance variable, e.g. "substance7".
+        output_extent(tuple): Extent for the output concentration GeoTIFF file.
+        output_path (str): Path to output concentration GeoTIFF file.
         calculation_steps (list(int)): Calculation step (default: [-1] (last))
-        calculate_maximum_waterlevel (bool):
+        calculate_maximum_concentration (bool):
           Use temporal maximum instead of specific timestep
         mode (str): Interpolation mode.
         progress_func(callable):

@@ -325,6 +325,7 @@ def test_calculators(mode, expected, admin):
     ])
 
     # prepare gridadmin uses
+    admin.grid.transform = 2, 0, 20, 0, 2, 40
     admin.cells.get_nodgrid.return_value = nodgrid[tuple(map(slice, *indices))]
     admin.variable = "s1"
     if mode in (MODE_CONSTANT_VAR):
@@ -410,7 +411,6 @@ def test_base_calculator_get_max_level(admin):
     admin.get_nodes().subset().timeseries().only().data = data
     # admin.get_nodes().subset().only().data = data
 
-    indexes = slice(7, 8)
     calculator_kwargs = {
         "result_admin": admin,
         "get_max_level": True,

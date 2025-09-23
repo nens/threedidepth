@@ -44,12 +44,12 @@ Usage
 From the cli::
 
     $ threedidepth gridadmin.h5 results_3di.nc dem.tif waterdepth.tif
-    $ threediwq gridadmin.h5 water_quality_results_3di.nc concentration.tif --substance_id 1
+    $ threediwq gridadmin.h5 water_quality_results_3di.nc substance1 <xmin ymin xmax ymax> concentration.tif
 
 Or python::
 
     >>> threedidepth.calculate_waterdepth(...)
-    >>> threedidepth.calculate_wq(...)
+    >>> threedidepth.calculate_water_quality(...)
 
 
 Development installation with Docker Compose
