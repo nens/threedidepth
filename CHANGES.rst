@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.6.4 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Add support for water quality results.
 
 
 0.6.3 (2024-03-22)

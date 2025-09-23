@@ -21,7 +21,7 @@ jobs:
         run: docker compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
 
       - name: Create virtualenv
-        run: docker compose run --rm lib python -m venv .venv --system-site-packages
+        run: docker compose run --rm lib python3 -m venv .venv --system-site-packages
 
       - name: Install requirements
         run: docker compose run --rm lib pip install -r requirements.txt
