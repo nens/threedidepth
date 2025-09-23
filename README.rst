@@ -1,11 +1,22 @@
 threedidepth
 ============
 
+Waterdepth
+----------
+
 Calculate waterdepths for 3Di results. For results of type 'raw' the variable
 's1' is used as waterlevel. For results of type 'aggregate', the variable
 's1_max' is used as waterlevel.
 
-* Interpolated or gridcell-constant waterlevels
+Concentrations
+--------------
+Calculate concentrations for 3Di water quality results.
+
+
+Features
+--------
+
+* Interpolated or gridcell-constant waterlevels or concentrations
 * Interfaces with threediresults via `threedigrid`
 * Progress indicator support
 * Low memory consumption
@@ -33,11 +44,12 @@ Usage
 From the cli::
 
     $ threedidepth gridadmin.h5 results_3di.nc dem.tif waterdepth.tif
-
+    $ threediwq gridadmin.h5 water_quality_results_3di.nc substance1 <xmin ymin xmax ymax> concentration.tif
 
 Or python::
 
     >>> threedidepth.calculate_waterdepth(...)
+    >>> threedidepth.calculate_water_quality(...)
 
 
 Development installation with Docker Compose
@@ -53,7 +65,7 @@ For development, clone the repository and use a docker compose setup::
 Create a virtualenv::
 
     # note that Dockerfile prepends .venv/bin to $PATH
-    (docker)$ virtualenv .venv --system-site-packages
+    (docker)$ python3 -m venv .venv --system-site-packages
 
 Install dependencies & package and run tests::
 
@@ -64,6 +76,6 @@ Install dependencies & package and run tests::
 Update packages::
     
     (docker)$ rm -rf .venv
-    (docker)$ virtualenv .venv --system-site-packages
+    (docker)$ python3 -m venv .venv --system-site-packages
     (docker)$ pip install -e .
     (docker)$ pip freeze | grep -v threedidepth > requirements.txt

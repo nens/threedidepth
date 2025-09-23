@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from functools import cached_property
 from itertools import product
 from os import path
 
@@ -13,19 +14,22 @@ import numpy as np
 
 from threedigrid.admin.gridresultadmin import GridH5ResultAdmin
 from threedigrid.admin.gridresultadmin import GridH5AggregateResultAdmin
+from threedigrid.admin.gridresultadmin import GridH5WaterQualityResultAdmin
 from threedigrid.admin.constants import SUBSET_2D_OPEN_WATER
 from threedigrid.admin.constants import NO_DATA_VALUE
 from threedidepth.fixes import fix_gridadmin
+from threedidepth.tiffs import AuxGeoTIFF
 from threedidepth import morton
 
 MODE_COPY = "copy"
 MODE_NODGRID = "nodgrid"
-MODE_CONSTANT_S1 = "constant-s1"
-MODE_LINEAR_S1 = "linear-s1"
-MODE_LIZARD_S1 = "lizard-s1"
+MODE_CONSTANT_VAR = "constant-var"
+MODE_LINEAR_VAR = "linear-var"
+MODE_LIZARD_VAR = "lizard-var"
 MODE_CONSTANT = "constant"
 MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
+MODE_LIZARD_WQ = "lizard-wq"
 
 
 class BaseCalculator:
@@ -37,20 +41,11 @@ class BaseCalculator:
         dem_shape (int, int): Shape of the dem array.
         dem_geo_transform: (tuple) Geo_transform of the dem.
     """
-
-    PIXEL_MAP = "pixel_map"
-    LOOKUP_S1 = "lookup_s1"
-    INTERPOLATOR = "interpolator"
-    DELAUNAY = "delaunay"
-
     def __init__(
         self, result_admin, dem_shape, dem_geo_transform,
         calculation_step=None, get_max_level=False
     ):
-        if calculation_step is None and not get_max_level:
-            raise ValueError(
-                "a calculation_step is required unless get_max_level is True"
-            )
+        assert get_max_level == (calculation_step is None)  # only one allowed
         self.ra = result_admin
         self.calculation_step = calculation_step
         self.get_max_level = get_max_level
@@ -90,12 +85,8 @@ class BaseCalculator:
 
         return depth
 
-    @staticmethod
-    def indexes(calculation_step):
-        return slice(calculation_step, calculation_step + 1)
-
-    @property
-    def lookup_s1(self):
+    @cached_property
+    def variable_lut(self):
         """
         Return the lookup table to find waterlevel by cell id.
 
@@ -103,31 +94,26 @@ class BaseCalculator:
         are currently not active ('no data') will return the NO_DATA_VALUE as
         defined in threedigrid.
         """
-        try:
-            return self.cache[self.LOOKUP_S1]
-        except KeyError:
-            nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
-            if self.get_max_level:
-                # array van Ntimesteps * Nnodes
-                timeseries = nodes.timeseries(
-                    indexes=slice(0, self.ra.calculation_steps)
-                )
-                data = timeseries.only(self.ra.variable, "id").data
-                s1 = np.max(data[self.ra.variable], axis=0)
-            else:
-                timeseries = nodes.timeseries(
-                    indexes=self.indexes(self.calculation_step)
-                )
-                data = timeseries.only(self.ra.variable, "id").data
-                s1 = data[self.ra.variable][0]
-            lookup_s1 = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
-            lookup_s1[data["id"]] = s1
-            self.cache[self.LOOKUP_S1] = lookup_s1
-        return lookup_s1
+        nodes = self.ra.get_nodes().subset(SUBSET_2D_OPEN_WATER)
+        n_time = self.ra.get_timestamps().size
+        if self.get_max_level:
+            # array off n_time * n_nodes
+            timeseries = nodes.timeseries(indexes=slice(0, n_time))
+            data = timeseries.only(self.ra.variable, "id").data
+            values = np.max(data[self.ra.variable], axis=0)
+        else:
+            timeseries = nodes.timeseries(indexes=slice(
+                self.calculation_step, self.calculation_step + 1
+            ))
+            data = timeseries.only(self.ra.variable, "id").data
+            values = data[self.ra.variable][0]
+        variable_lut = np.full((data["id"]).max() + 1, NO_DATA_VALUE)
+        variable_lut[data["id"]] = values
+        return variable_lut
 
     @property
     def coordinates(self):
-        nodes = self.ra.nodes.subset(SUBSET_2D_OPEN_WATER)
+        nodes = self.ra.get_nodes().subset(SUBSET_2D_OPEN_WATER)
         data = nodes.only("id", "coordinates").data
         # transpose does:
         # [[x1, x2, x3], [y1, y2, y3]] --> [[x1, y1], [x2, y2], [x3, y3]]
@@ -135,20 +121,16 @@ class BaseCalculator:
         ids = data["id"]
         return points, ids
 
-    @property
+    @cached_property
     def interpolator(self):
-        try:
-            return self.cache[self.INTERPOLATOR]
-        except KeyError:
-            points, ids = self.coordinates
-            s1 = self.lookup_s1[ids]
-            interpolator = LinearNDInterpolator(
-                points, s1, fill_value=NO_DATA_VALUE
-            )
-            self.cache[self.INTERPOLATOR] = interpolator
-            return interpolator
+        points, ids = self.coordinates
+        values = self.variable_lut[ids]
+        interpolator = LinearNDInterpolator(
+            points, values, fill_value=NO_DATA_VALUE
+        )
+        return interpolator
 
-    @property
+    @cached_property
     def delaunay(self):
         """
         Return a (delaunay, ids) tuple.
@@ -156,17 +138,13 @@ class BaseCalculator:
         `delaunay` is a scipy.spatial.Delaunay object, and `ids` is an array of
         ids for the corresponding simplices.
         """
-        try:
-            return self.cache[self.DELAUNAY]
-        except KeyError:
-            points, ids = self.coordinates
+        points, ids = self.coordinates
 
-            # reorder a la lizard
-            points, ids = morton.reorder(points, ids)
+        # reorder a la lizard
+        points, ids = morton.reorder(points, ids)
 
-            delaunay = Delaunay(points)
-            self.cache[self.DELAUNAY] = delaunay, ids
-            return delaunay, ids
+        delaunay = Delaunay(points)
+        return delaunay, ids
 
     def _get_nodgrid(self, indices):
         """Return node grid.
@@ -174,11 +152,21 @@ class BaseCalculator:
         Args:
             indices (tuple): ((i1, j1), (i2, j2)) subarray indices
         """
+        # (xm, ym) is the lower-left nodgrid origin
+        dx, _, xm, _, dy, ym = self.ra.grid.transform
+
+        # (xi, yi) is the upper-left target origin
+        xt, yt = self.dem_geo_transform[::3]
+
+        # compute the distance in cells between these origins
+        dj = round((xt - xm) / dx)
+        di = round((yt - ym) / dy)
+
         (i1, j1), (i2, j2) = indices
 
         # note that get_nodgrid() starts counting rows from the bottom
-        h = self.dem_shape[0]
-        i1, i2 = h - i2, h - i1
+        i1, i2 = di - i2, di - i1
+        j1, j2 = dj + j1, dj + j2
 
         # note that get_nodgrid() expects a columns-first bbox
         return self.ra.cells.get_nodgrid(
@@ -196,13 +184,6 @@ class BaseCalculator:
         p, a, b, q, c, d = self.dem_geo_transform
         return local_ji * [a, d] + [p + 0.5 * a, q + 0.5 * d]
 
-    def __enter__(self):
-        self.cache = {}
-        return self
-
-    def __exit__(self, *args):
-        self.cache = None
-
 
 class CopyCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
@@ -219,7 +200,7 @@ class NodGridCalculator(BaseCalculator):
 class ConstantLevelCalculator(BaseCalculator):
     def __call__(self, indices, values, no_data_value):
         """Return waterlevel array."""
-        return self.lookup_s1[self._get_nodgrid(indices)]
+        return self.variable_lut[self._get_nodgrid(indices)]
 
 
 class LinearLevelCalculator(BaseCalculator):
@@ -248,12 +229,12 @@ class LizardLevelCalculator(BaseCalculator):
         used."""
         # start with the constant level result
         nodgrid = self._get_nodgrid(indices).ravel()
-        level = self.lookup_s1[nodgrid]
+        level = self.variable_lut[nodgrid]
 
         # determine result raster cell centers and in which triangle they are
         points = self._get_points(indices)
         delaunay, ids = self.delaunay
-        s1 = self.lookup_s1[ids]
+        s1 = self.variable_lut[ids]
         simplices = delaunay.find_simplex(points)
 
         # determine which points will use interpolation
@@ -349,8 +330,7 @@ class GeoTIFFConverter:
             raise OSError("%s already exists." % self.target_path)
 
     def __enter__(self):
-        """Open datasets.
-        """
+        """Open datasets."""
         self.source = gdal.Open(self.source_path, gdal.GA_ReadOnly)
         block_x_size, block_y_size = self.block_size
         options = ["compress=deflate", "blockysize=%s" % block_y_size]
@@ -510,7 +490,7 @@ class NetcdfConverter(GeoTIFFConverter):
         time.calendar = "standard"
         time.axis = "T"
         time.units = self.ra.get_time_units()
-        time[:] = self.ra.get_timestamps(self.calculation_steps)
+        time[:] = self.ra.get_timestamps()[self.calculation_steps]
 
     def _set_coords(self):
         geotransform = self.source.GetGeoTransform()
@@ -634,37 +614,60 @@ class ResultAdmin:
         gridadmin_path (str): Path to gridadmin.h5 file.
         results_3di_path (str): Path to (aggregate_)results_3di.nc file.
 
-    Wraps either GridH5ResultAdmin or GridH5AggregateResultAdmin, based on the
-    result type of the file at results_3di_path . Also has custom properties
-    `result_type`, `variable` and `calculation_steps`.
+    There differences in the way the different ResultAdmin classes from
+    threedigrid work. The GridH5ResultAdmin and the GridH5AggregateResultAdmin
+    give access to all variables through the same nodes instance, but for the
+    latter the timestamps is a mapping because they can be different from
+    variable to variable. The GridH5WaterQualityResultAdmin has each variable
+    as presented as its own "nodes" attribute on the object.
+
+    This class selects the correct ResultAdmin class, and adds a number of
+    custom properties that are otherwise derived or used in different ways from
+    the different ResultAdmins: `result_type`, `variable` and
+    `calculation_steps` and `unodes` (unified nodes)
     """
 
-    def __init__(self, gridadmin_path, results_3di_path):
+    def __init__(self, gridadmin_path, results_3di_path, variable=None):
         with h5py.File(results_3di_path) as h5:
             self.result_type = h5.attrs['result_type'].decode('ascii')
 
         result_admin_args = gridadmin_path, results_3di_path
         if self.result_type == "raw":
             self._result_admin = GridH5ResultAdmin(*result_admin_args)
+            self.nodes_attr = "nodes"
             self.variable = "s1"
-            self.calculation_steps = self.nodes.timestamps.size
-        else:
+        elif self.result_type == "aggregate":
             self._result_admin = GridH5AggregateResultAdmin(*result_admin_args)
+            self.nodes_attr = "nodes"
             self.variable = "s1_max"
-            self.calculation_steps = self.nodes.timestamps[self.variable].size
-
-    def get_timestamps(self, calculation_steps):
-        if self.result_type == "raw":
-            return self.nodes.timestamps[calculation_steps]
         else:
-            return self.nodes.timestamps[self.variable][calculation_steps]
+            assert self.result_type == "Water Quality Results"
+            assert variable is not None
+            self._result_admin = GridH5WaterQualityResultAdmin(
+                *result_admin_args
+            )
+            self.nodes_attr = variable
+            self.variable = "concentration"
+
+    def get_nodes(self):
+        return getattr(self._result_admin, self.nodes_attr)
+
+    def get_timestamps(self):
+        nodes = self.get_nodes()
+        if self.result_type == "aggregate":
+            return nodes.timestamps[self.variable]
+        else:
+            return nodes.timestamps
 
     def get_time_units(self):
         if self.result_type == "raw":
             return self.time_units.decode("utf-8")
+        if self.result_type == "aggregate":
+            time_variable = "time_s1_max"
         else:
-            nc = self._result_admin.netcdf_file
-            return nc['time_s1_max'].attrs['units'].decode('utf-8')
+            time_variable = "time"
+        nc = self._result_admin.netcdf_file
+        return nc[time_variable].attrs['units'].decode('utf-8')
 
     def __getattr__(self, name):
         return getattr(self._result_admin, name)
@@ -673,12 +676,13 @@ class ResultAdmin:
 calculator_classes = {
     MODE_COPY: CopyCalculator,
     MODE_NODGRID: NodGridCalculator,
-    MODE_CONSTANT_S1: ConstantLevelCalculator,
-    MODE_LINEAR_S1: LinearLevelCalculator,
-    MODE_LIZARD_S1: LizardLevelCalculator,
+    MODE_CONSTANT_VAR: ConstantLevelCalculator,
+    MODE_LINEAR_VAR: LinearLevelCalculator,
+    MODE_LIZARD_VAR: LizardLevelCalculator,
     MODE_CONSTANT: ConstantLevelDepthCalculator,
     MODE_LINEAR: LinearLevelDepthCalculator,
     MODE_LIZARD: LizardLevelDepthCalculator,
+    MODE_LIZARD_WQ: LizardLevelCalculator,
 }
 
 
@@ -701,7 +705,12 @@ def calculate_waterdepth(
         dem_path (str): Path to dem.tif file.
         waterdepth_path (str): Path to waterdepth.tif file.
         calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        calculate_maximum_waterlevel (bool):
+          Use temporal maximum instead of specific timestep
         mode (str): Interpolation mode.
+        progress_func(callable):
+          Function that receives progress updates as float between 0 and 1
+        netcdf(bool): Write a netCDF file instead of a GeoTIFF.
     """
     try:
         CalculatorClass = calculator_classes[mode]
@@ -711,11 +720,13 @@ def calculate_waterdepth(
     result_admin = ResultAdmin(
         gridadmin_path=gridadmin_path, results_3di_path=results_3di_path,
     )
+    assert result_admin.result_type in {"raw", "aggregate"}
 
     # handle calculation step
     if calculate_maximum_waterlevel:
         calculation_steps = [0]
-    max_calculation_step = result_admin.calculation_steps - 1
+
+    max_calculation_step = result_admin.get_timestamps().size - 1
     if calculation_steps is None:
         calculation_steps = [max_calculation_step]
     else:
@@ -760,5 +771,109 @@ def calculate_waterdepth(
                 **calculator_kwargs_except_step,
             }
 
-            with CalculatorClass(**calculator_kwargs) as calculator:
+            calculator = CalculatorClass(**calculator_kwargs)
+            converter.convert_using(calculator=calculator, band=band)
+
+
+def calculate_water_quality(
+    gridadmin_path,
+    water_quality_results_3di_path,
+    variable,
+    output_extent,
+    output_path,
+    calculation_steps=None,
+    calculate_maximum_concentration=False,
+    mode=MODE_LIZARD_VAR,
+    progress_func=None,
+    netcdf=False,
+):
+    """Calculate concentation and save it as GeoTIFF.
+
+    Args:
+        gridadmin_path (str): Path to gridadmin.h5 file.
+        water_quality_results_3di_path (str): Path to water_quality_results_3di.nc file.
+        variable(str): Name of the substance variable, e.g. "substance7".
+        output_extent(tuple): Extent for the output concentration GeoTIFF file.
+        output_path (str): Path to output concentration GeoTIFF file.
+        calculation_steps (list(int)): Calculation step (default: [-1] (last))
+        calculate_maximum_concentration (bool):
+          Use temporal maximum instead of specific timestep
+        mode (str): Interpolation mode.
+        progress_func(callable):
+          Function that receives progress updates as float between 0 and 1
+        netcdf(bool): Write a netCDF file instead of a GeoTIFF.
+
+    The actual extent of the output will be the extent argument rounded
+    to align with dem cells.
+    """
+    result_admin = ResultAdmin(
+        gridadmin_path=gridadmin_path,
+        results_3di_path=water_quality_results_3di_path,
+        variable=variable,
+    )
+    assert result_admin.result_type == "Water Quality Results"
+
+    try:
+        CalculatorClass = calculator_classes[mode]
+    except KeyError:
+        raise ValueError("Unknown mode: '%s'" % mode)
+
+    # handle calculation step
+    if calculate_maximum_concentration:
+        calculation_steps = [0]
+
+    max_calculation_step = result_admin.get_timestamps().size - 1
+    if calculation_steps is None:
+        calculation_steps = [max_calculation_step]
+    else:
+        assert min(calculation_steps) >= 0
+        assert max(calculation_steps) <= max_calculation_step, (
+            "Maximum calculation step is '%s'." % max_calculation_step
+        )
+
+    # construct a prototype in-memory geotiff
+    dx, _, xmin, _, dy, ymin = result_admin.grid.transform
+    with AuxGeoTIFF(
+        bbox=output_extent,
+        origin=(xmin, ymin),
+        cellsize=(dx, dy),
+        projection=osr.GetUserInputAsWKT(f"EPSG:{result_admin.epsg_code}"),
+    ) as prototype_path:
+
+        # set up things
+        progress_class = ProgressClass(
+            calculation_steps=calculation_steps, progress_func=progress_func,
+        )
+        converter_kwargs = {
+            "source_path": prototype_path,
+            "target_path": output_path,
+            "progress_func": None if progress_func is None else progress_class,
+        }
+        if netcdf:
+            converter_class = NetcdfConverter
+            converter_kwargs['result_admin'] = result_admin
+            converter_kwargs['calculation_steps'] = calculation_steps
+            converter_kwargs[
+                'write_time_dimension'
+            ] = not calculate_maximum_concentration
+        else:
+            converter_class = GeoTIFFConverter
+            converter_kwargs['band_count'] = len(calculation_steps)
+
+        # calculate
+        with converter_class(**converter_kwargs) as converter:
+            calculator_kwargs_except_step = {
+                "result_admin": result_admin,
+                "dem_geo_transform": converter.geo_transform,
+                "dem_shape": (converter.raster_y_size, converter.raster_x_size),
+                "get_max_level": calculate_maximum_concentration
+            }
+
+            for band, calculation_step in progress_class:
+                calculator_kwargs = {
+                    "calculation_step": calculation_step,
+                    **calculator_kwargs_except_step,
+                }
+
+                calculator = CalculatorClass(**calculator_kwargs)
                 converter.convert_using(calculator=calculator, band=band)
