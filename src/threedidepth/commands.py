@@ -88,12 +88,14 @@ def threediwq(*args):
         type=str,
         help="Substance variable in netcdf",
     )
-    parser.add_argument(
-        "output_extent",
-        type=int,
-        nargs=4,
-        help="Extent for resulting geotiff",
-    )
+    for output_extent_element in ("xmin", "ymin", "xmax", "ymax"):
+        parser.add_argument(
+            "output_extent",
+            metavar=output_extent_element,
+            type=int,
+            action="append",
+            help=f"{output_extent_element} of output extent",
+        )
     parser.add_argument(
         "output_path",
         help="path to resulting geotiff"
@@ -104,6 +106,7 @@ def threediwq(*args):
         "--steps",
         nargs="+",
         type=int,
+        metavar="STEP",
         dest="calculation_steps",
         help="simulation result step(s)",
     )
