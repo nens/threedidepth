@@ -2,7 +2,7 @@ Changelog of threedidepth
 =========================
 
 
-0.7.1 (unreleased)
+0.7.1 (2025-09-24)
 ------------------
 
 - Keep old mode constants available for backwards compatibility.
