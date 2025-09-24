@@ -43,5 +43,4 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          python -c "import sys; print(sys.path)"
           pytest
