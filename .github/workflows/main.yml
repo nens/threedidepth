@@ -7,30 +7,40 @@ on:
       - master
   pull_request:
 
-# A workflow run is made up of one or more jobs that can run sequentially or
-# in parallel
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  TestLinux:
+    name: Linux, Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+          - python: "3.13"
 
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can
-      # access it
       - uses: actions/checkout@v4
-      - name: Build docker
-        run: docker compose build --build-arg uid=`id -u` --build-arg gid=`id -g` lib
 
-      - name: Create virtualenv
-        run: docker compose run --rm lib python3 -m venv .venv --system-site-packages
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
 
-      - name: Install requirements
-        run: docker compose run --rm lib pip install -r requirements.txt
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install --yes --no-install-recommends libgdal-dev
 
-      - name: Install our package
-        run: docker compose run --rm lib pip install -e .[test]
+      - name: Install python dependencies
+        shell: bash
+        run: |
+          pip install --disable-pip-version-check --upgrade setuptools
+          pip install .[test]
+          pip install GDAL==$(gdal-config --version) --no-build-isolation # install gdal AFTER numpy
+          pip list
 
       - name: Run tests
-        run: docker compose run --rm lib pytest
-
-      - name: Flake8
-        run: if docker compose run --rm lib flake8 > flake8.txt; then echo 'flake8 is a success'; else cat flake8.txt; false; fi
+        shell: bash
+        run: |
+          pytest
