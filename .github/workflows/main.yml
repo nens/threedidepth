@@ -30,12 +30,13 @@ jobs:
       - name: Install GDAL
         run: |
           sudo apt update
-          sudo apt install --yes --no-install-recommends python3-gdal libgdal-dev
+          sudo apt install --yes --no-install-recommends libgdal-dev
 
       - name: Install python dependencies
         shell: bash
         run: |
           pip install .[test]
+          pip install GDAL==$(gdal-config --version) --no-build-isolation # install gdal AFTER numpy
           pip list
 
       - name: Run tests
