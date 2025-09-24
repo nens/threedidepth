@@ -17,7 +17,7 @@ jobs:
       matrix:
         include:
           - python: "3.12"
-          #- python: "3.13"
+          - python: "3.13"
 
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install GDAL
+      - name: Install packages
         run: |
           sudo apt update
           sudo apt install --yes --no-install-recommends libgdal-dev
@@ -35,7 +35,7 @@ jobs:
       - name: Install python dependencies
         shell: bash
         run: |
-          pip install --disable-pip-version-check --upgrade pip setuptools wheel
+          pip install --disable-pip-version-check --upgrade setuptools
           pip install .[test]
           pip install GDAL==$(gdal-config --version) --no-build-isolation # install gdal AFTER numpy
           pip list
