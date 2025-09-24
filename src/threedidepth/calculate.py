@@ -31,6 +31,11 @@ MODE_LINEAR = "linear"
 MODE_LIZARD = "lizard"
 MODE_LIZARD_WQ = "lizard-wq"
 
+# keep old constants for backwards compatibility
+MODE_CONSTANT_S1 = "constant-var"
+MODE_LINEAR_S1 = "linear-var"
+MODE_LIZARD_S1 = "lizard-var"
+
 
 class BaseCalculator:
     """Depth calculator using constant waterlevel in a grid cell.
