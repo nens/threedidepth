@@ -2,7 +2,7 @@ Changelog of threedidepth
 =========================
 
 
-0.7.4 (unreleased)
+0.7.4 (2025-10-03)
 ------------------
 
 - Remove faulty assertion. Add a note.
