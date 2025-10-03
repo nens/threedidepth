@@ -2,7 +2,19 @@ Changelog of threedidepth
 =========================
 
 
-0.6.4 (unreleased)
+0.7.2 (unreleased)
+------------------
+
+- Add timestamps to band descriptions.
+
+
+0.7.1 (2025-09-24)
+------------------
+
+- Keep old mode constants available for backwards compatibility.
+
+
+0.7.0 (2025-09-23)
 ------------------
 
 - Add support for water quality results.

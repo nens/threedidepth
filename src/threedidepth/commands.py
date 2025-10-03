@@ -11,6 +11,10 @@ from threedidepth.calculate import MODE_CONSTANT_VAR
 from threedidepth.calculate import MODE_LIZARD
 from threedidepth.calculate import MODE_LIZARD_VAR
 
+# keep old constants for backwards compatibility
+from threedidepth.calculate import MODE_CONSTANT_S1  # noqa
+from threedidepth.calculate import MODE_LIZARD_S1  # noqa
+
 
 def threedidepth(*args):
     parser = argparse.ArgumentParser()
