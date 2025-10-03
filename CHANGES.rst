@@ -2,7 +2,7 @@ Changelog of threedidepth
 =========================
 
 
-0.7.2 (unreleased)
+0.7.2 (2025-10-03)
 ------------------
 
 - Add timestamps to band descriptions.
