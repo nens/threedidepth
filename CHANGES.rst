@@ -2,7 +2,7 @@ Changelog of threedidepth
 =========================
 
 
-0.7.3 (unreleased)
+0.7.3 (2025-10-03)
 ------------------
 
 - Handle broken WaterQuality results gracefully.
