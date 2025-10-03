@@ -5,7 +5,7 @@ Changelog of threedidepth
 0.7.2 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Add timestamps to band descriptions.
 
 
 0.7.1 (2025-09-24)

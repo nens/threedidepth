@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from datetime import datetime as Datetime, timedelta as Timedelta
 from functools import cached_property
 from itertools import product
 from os import path
@@ -35,6 +36,15 @@ MODE_LIZARD_WQ = "lizard-wq"
 MODE_CONSTANT_S1 = "constant-var"
 MODE_LINEAR_S1 = "linear-var"
 MODE_LIZARD_S1 = "lizard-var"
+
+
+def num2date(time, units):
+    """ Very limited version of the well known cftime implementation. """
+    prefix = "seconds since "
+    assert units.startswith(prefix)
+    assert isinstance(time, (float, int))
+    origin = Datetime.fromisoformat(units[len(prefix):])
+    return origin + Timedelta(seconds=time)
 
 
 class BaseCalculator:
@@ -312,7 +322,8 @@ class GeoTIFFConverter:
     Args:
         source_path (str): Path to source GeoTIFF file.
         target_path (str): Path to target GeoTIFF file.
-        band_count (int): Number of bands in the target file.
+        result_admin (ResultAdmin): calculators.ResultAdmin object
+        calculation_steps (list[int]): List of (zero-based) calculation steps
         progress_func: a callable.
 
         The progress_func will be called multiple times with values between 0.0
@@ -323,12 +334,15 @@ class GeoTIFFConverter:
             self,
             source_path,
             target_path,
-            band_count=1,
+            result_admin,
+            calculation_steps,
             progress_func=None,
     ):
         self.source_path = source_path
         self.target_path = target_path
-        self.band_count = band_count
+        self.ra = result_admin
+        self.calculation_steps = calculation_steps
+        self.band_count = len(calculation_steps)
         self.progress_func = progress_func
 
         if path.exists(self.target_path):
@@ -352,7 +366,13 @@ class GeoTIFFConverter:
         )
         self.target.SetProjection(self.projection)
         self.target.SetGeoTransform(self.geo_transform)
-        self.target.GetRasterBand(1).SetNoDataValue(self.no_data_value)
+        time_units = self.ra.get_time_units()
+        timestamps = self.ra.get_timestamps()
+        for i, s in enumerate(self.calculation_steps):
+            band = self.target.GetRasterBand(i + 1)
+            band.SetNoDataValue(self.no_data_value)
+            datetime = num2date(timestamps[s].item(), units=time_units)
+            band.SetDescription(str(datetime))
 
         return self
 
@@ -444,20 +464,8 @@ class GeoTIFFConverter:
 class NetcdfConverter(GeoTIFFConverter):
     """Convert NetCDF4 according to the CF-1.6 standards."""
 
-    def __init__(
-            self,
-            source_path,
-            target_path,
-            result_admin,
-            calculation_steps,
-            write_time_dimension=True,
-            **kwargs
-    ):
-        kwargs["band_count"] = len(calculation_steps)
-        super().__init__(source_path, target_path, **kwargs)
-
-        self.ra = result_admin
-        self.calculation_steps = calculation_steps
+    def __init__(self, *args, write_time_dimension=True, **kwargs):
+        super().__init__(*args, **kwargs)
         self.write_time_dimension = write_time_dimension
 
     def __enter__(self):
@@ -573,7 +581,7 @@ class NetcdfConverter(GeoTIFFConverter):
             )
 
             # write
-            water_depth = self.target['water_depth']
+            water_depth = self.target["water_depth"]
             if self.write_time_dimension:
                 water_depth[
                     band, yoff:yoff + ysize, xoff:xoff + xsize
@@ -634,7 +642,7 @@ class ResultAdmin:
 
     def __init__(self, gridadmin_path, results_3di_path, variable=None):
         with h5py.File(results_3di_path) as h5:
-            self.result_type = h5.attrs['result_type'].decode('ascii')
+            self.result_type = h5.attrs["result_type"].decode("ascii")
 
         result_admin_args = gridadmin_path, results_3di_path
         if self.result_type == "raw":
@@ -672,7 +680,7 @@ class ResultAdmin:
         else:
             time_variable = "time"
         nc = self._result_admin.netcdf_file
-        return nc[time_variable].attrs['units'].decode('utf-8')
+        return nc[time_variable].attrs["units"].decode("utf-8")
 
     def __getattr__(self, name):
         return getattr(self._result_admin, name)
@@ -749,18 +757,15 @@ def calculate_waterdepth(
     converter_kwargs = {
         "source_path": dem_path,
         "target_path": waterdepth_path,
+        "result_admin": result_admin,
+        "calculation_steps": calculation_steps,
         "progress_func": None if progress_func is None else progress_class,
     }
     if netcdf:
         converter_class = NetcdfConverter
-        converter_kwargs['result_admin'] = result_admin
-        converter_kwargs['calculation_steps'] = calculation_steps
-        converter_kwargs[
-            'write_time_dimension'
-        ] = not calculate_maximum_waterlevel
+        converter_kwargs["write_time_dimension"] = not calculate_maximum_waterlevel
     else:
         converter_class = GeoTIFFConverter
-        converter_kwargs['band_count'] = len(calculation_steps)
 
     with converter_class(**converter_kwargs) as converter:
         calculator_kwargs_except_step = {
@@ -852,18 +857,17 @@ def calculate_water_quality(
         converter_kwargs = {
             "source_path": prototype_path,
             "target_path": output_path,
+            "result_admin": result_admin,
+            "calculation_steps": calculation_steps,
             "progress_func": None if progress_func is None else progress_class,
         }
         if netcdf:
             converter_class = NetcdfConverter
-            converter_kwargs['result_admin'] = result_admin
-            converter_kwargs['calculation_steps'] = calculation_steps
             converter_kwargs[
-                'write_time_dimension'
+                "write_time_dimension"
             ] = not calculate_maximum_concentration
         else:
             converter_class = GeoTIFFConverter
-            converter_kwargs['band_count'] = len(calculation_steps)
 
         # calculate
         with converter_class(**converter_kwargs) as converter:

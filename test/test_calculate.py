@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from contextlib import contextmanager
+from datetime import datetime as Datetime
 from unittest import mock
 import random
 import string
@@ -28,6 +29,7 @@ from threedidepth.calculate import ProgressClass
 from threedidepth.calculate import SUBSET_2D_OPEN_WATER
 from threedidepth.calculate import calculate_waterdepth
 from threedidepth.calculate import calculator_classes
+from threedidepth.calculate import num2date
 
 RD = osr.GetUserInputAsWKT("EPSG:28992")
 NDV = -9  # no data value of the test dem
@@ -112,13 +114,20 @@ def test_progress_class():
 
 
 @mark.parametrize("source_path", [False, True], indirect=True)
-def test_geotiff_converter(source_path, target_path):
+def test_geotiff_converter(source_path, target_path, admin):
+    admin.result_type = "raw"
+    admin.get_timestamps.return_value = np.array([1, 3, 5])
+    admin.get_time_units.return_value = 'seconds since 2021-03-02 10:00:00'
+    admin.model_slug = "my_model_slug"
+    admin.epsg_code = "28992"
+    admin.variable = "s1"
     progress_func = mock.Mock()
-    band_count = 3
+    calculation_steps = [0, 1, 2]
     converter_kwargs = {
         "source_path": source_path,
         "target_path": target_path,
-        "band_count": band_count,
+        "result_admin": admin,
+        "calculation_steps": calculation_steps,
         "progress_func": progress_func,
     }
 
@@ -148,15 +157,19 @@ def test_geotiff_converter(source_path, target_path):
 
     target = gdal.Open(target_path)
     target_array = target.ReadAsArray()
-    target_bands = [target.GetRasterBand(i + 1) for i in range(band_count)]
+    target_bands = [target.GetRasterBand(i + 1) for i in range(len(calculation_steps))]
     target_no_data_values = [b.GetNoDataValue() for b in target_bands]
     target_block_sizes = [b.GetBlockSize() for b in target_bands]
+    target_descriptions = [b.GetDescription() for b in target_bands]
 
     assert source.GetGeoTransform() == target.GetGeoTransform()
     assert source.GetProjection() == target.GetProjection()
-    assert all(source_block_size == v for v in target_block_sizes)
     assert all(source_no_data_value == v for v in target_no_data_values)
-    assert len(target_array) == band_count
+    assert all(source_block_size == v for v in target_block_sizes)
+    assert target_descriptions == [
+        '2021-03-02 10:00:01', '2021-03-02 10:00:03', '2021-03-02 10:00:05'
+    ]
+    assert len(target_array) == len(calculation_steps)
     assert np.equal(source_array, target_array[[0, 2]]).all()
     assert np.equal(0, target_array[[1]]).all()
 
@@ -165,8 +178,7 @@ def test_tiff_converter_existing_target(tmpdir):
     target_path = tmpdir.join("target.tif")
     target_path.ensure(file=True)  # "touch" the file
     with raises(OSError, match="exists"):
-        GeoTIFFConverter(
-            source_path=None, target_path=target_path, progress_func=None)
+        GeoTIFFConverter(None, target_path, None, [])
 
 
 @mark.parametrize("source_path", [False, True], indirect=True)
@@ -233,7 +245,8 @@ def test_calculate_waterdepth_wrong_step(admin):
 
 
 def test_calculate_waterdepth(source_path, target_path, admin):
-    admin.get_timestamps().size = 2
+    admin.get_timestamps.return_value = np.array([1, 3, 5])
+    admin.get_time_units.return_value = 'seconds since 2021-03-02 10:00:00'
     admin.result_type = "raw"
     with mock.patch("threedidepth.calculate.fix_gridadmin"):
         calculate_waterdepth(
@@ -459,3 +472,8 @@ def test_depth_calculators(depthmock, mode):
 def test_calculator_not_implemented():
     with raises(NotImplementedError):
         BaseCalculator("", "", "", "")("", "", "")
+
+
+def test_num2date():
+    datetime = num2date(time=1, units="seconds since 2001-02-03 04:05:06")
+    assert datetime == Datetime(2001, 2, 3, 4, 5, 7)
