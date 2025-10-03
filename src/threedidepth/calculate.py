@@ -371,9 +371,12 @@ class GeoTIFFConverter:
         for i, s in enumerate(self.calculation_steps):
             band = self.target.GetRasterBand(i + 1)
             band.SetNoDataValue(self.no_data_value)
-            datetime = num2date(timestamps[s].item(), units=time_units)
-            band.SetDescription(str(datetime))
-
+            try:
+                datetime = num2date(timestamps[s].item(), units=time_units)
+                band.SetDescription(str(datetime))
+            except AssertionError:
+                pass
+                # there are wq files lying around with nothing after "seconds since"
         return self
 
     def __exit__(self, *args):
