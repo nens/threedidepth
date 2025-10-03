@@ -60,12 +60,13 @@ class BaseCalculator:
         self, result_admin, dem_shape, dem_geo_transform,
         calculation_step=None, get_max_level=False
     ):
-        assert get_max_level == (calculation_step is None)  # only one allowed
         self.ra = result_admin
-        self.calculation_step = calculation_step
-        self.get_max_level = get_max_level
         self.dem_shape = dem_shape
         self.dem_geo_transform = dem_geo_transform
+
+        # note that calculation_step is not actually used when get_max_level
+        self.get_max_level = get_max_level
+        self.calculation_step = calculation_step
 
     def __call__(self, indices, values, no_data_value):
         """Return result values array.
